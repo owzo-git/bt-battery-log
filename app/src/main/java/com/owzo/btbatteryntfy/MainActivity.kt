@@ -24,6 +24,7 @@ import com.owzo.btbatteryntfy.monitor.BatteryMonitorEngine
 import com.owzo.btbatteryntfy.data.AppPreferences
 import com.owzo.btbatteryntfy.data.AppSettings
 import com.owzo.btbatteryntfy.monitor.MonitoringWorkScheduler
+import com.owzo.btbatteryntfy.monitor.SystemEventReceiver
 import com.owzo.btbatteryntfy.databinding.ActivityMainBinding
 import com.owzo.btbatteryntfy.net.NtfyClient
 import java.util.concurrent.ExecutorService
@@ -46,13 +47,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         appPreferences.appendLog(
-            "[fg-debug] No Bluetooth broadcasts seen while app is visible. This phone may not expose connect or battery broadcasts to third-party apps. Use Refresh now to run a direct battery probe.",
+            "No Bluetooth events seen while the app was open. Use Refresh now to run a direct battery check.",
         )
     }
     private val foregroundDebugReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action ?: return
-            foregroundDebugEventCount += 1
             val device = IntentCompat.getParcelableExtra(
                 intent,
                 BluetoothDevice.EXTRA_DEVICE,
@@ -62,21 +62,9 @@ class MainActivity : AppCompatActivity() {
                 BatteryMonitorEngine.safeDeviceName(device),
                 device?.address,
             )
-            val details = when (action) {
-                BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED ->
-                    "state=${intent.getIntExtra(BluetoothAdapter.EXTRA_CONNECTION_STATE, BluetoothAdapter.ERROR)} prev=${intent.getIntExtra(BluetoothAdapter.EXTRA_PREVIOUS_CONNECTION_STATE, BluetoothAdapter.ERROR)}"
-                BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED,
-                BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED,
-                -> "state=${intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)} prev=${intent.getIntExtra(BluetoothProfile.EXTRA_PREVIOUS_STATE, BluetoothProfile.STATE_DISCONNECTED)}"
-                AppConstants.ACTION_BATTERY_LEVEL_CHANGED ->
-                    "battery=${intent.getIntExtra(AppConstants.EXTRA_BATTERY_LEVEL, -1)}"
-                AppConstants.ACTION_HF_INDICATORS_VALUE_CHANGED ->
-                    "indicatorId=${intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_ID, -1)} value=${intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_VALUE, -1)}"
-                else -> ""
-            }
-            appPreferences.appendLog(
-                "[fg-debug] action=$action device=$deviceLabel${if (details.isNotBlank()) " $details" else ""}",
-            )
+            val message = summarizeForegroundDebugEvent(action, intent, deviceLabel) ?: return
+            foregroundDebugEventCount += 1
+            appPreferences.appendLog(message)
         }
     }
 
@@ -316,11 +304,7 @@ class MainActivity : AppCompatActivity() {
 
         val filter = IntentFilter().apply {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
-            addAction(BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
-            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
-            addAction(BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED)
-            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
             addAction(AppConstants.ACTION_BATTERY_LEVEL_CHANGED)
             addAction(AppConstants.ACTION_HF_INDICATORS_VALUE_CHANGED)
             addAction(BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT)
@@ -350,11 +334,11 @@ class MainActivity : AppCompatActivity() {
         }
 
         appPreferences.appendLog(
-            "[fg-debug] receiver registered. monitoring=${settings.monitoringEnabled} permission=$permissionState bluetooth=$bluetoothState.",
+            "App open. Monitoring=${settings.monitoringEnabled}, permission=$permissionState, Bluetooth=$bluetoothState.",
         )
 
         if (settings.monitoringEnabled && permissionState == "granted" && bluetoothState == "on") {
-            appPreferences.appendLog("[fg-debug] Scheduling snapshot because app is visible.")
+            appPreferences.appendLog("App opened. Checking connected devices.")
             MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "activity_visible")
         }
 
@@ -379,6 +363,55 @@ class MainActivity : AppCompatActivity() {
 
             autoSaveHandler.removeCallbacks(autoSaveRunnable)
             autoSaveHandler.postDelayed(autoSaveRunnable, AUTO_SAVE_DELAY_MS)
+        }
+    }
+
+    private fun summarizeForegroundDebugEvent(
+        action: String,
+        intent: Intent,
+        deviceLabel: String,
+    ): String? {
+        return when (action) {
+            BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                    BluetoothAdapter.STATE_ON -> "Bluetooth turned on."
+                    BluetoothAdapter.STATE_OFF -> "Bluetooth turned off."
+                    else -> null
+                }
+            }
+
+            BluetoothDevice.ACTION_ACL_CONNECTED ->
+                "$deviceLabel connected."
+
+            AppConstants.ACTION_BATTERY_LEVEL_CHANGED -> {
+                val battery = intent.getIntExtra(AppConstants.EXTRA_BATTERY_LEVEL, -1)
+                if (battery in 0..100) {
+                    "$deviceLabel battery broadcast: $battery%."
+                } else {
+                    null
+                }
+            }
+
+            AppConstants.ACTION_HF_INDICATORS_VALUE_CHANGED -> {
+                val indicatorId = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_ID, -1)
+                val value = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_VALUE, -1)
+                if (indicatorId == AppConstants.HF_BATTERY_INDICATOR_ID && value in 0..100) {
+                    "$deviceLabel headset battery: $value%."
+                } else {
+                    null
+                }
+            }
+
+            BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
+                val value = SystemEventReceiver.parseVendorSpecificBattery(intent)
+                if (value in 0..100) {
+                    "$deviceLabel headset battery: $value%."
+                } else {
+                    null
+                }
+            }
+
+            else -> null
         }
     }
 

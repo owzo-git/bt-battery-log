@@ -19,50 +19,48 @@ class SnapshotWorker(
         val appPreferences = AppPreferences(applicationContext)
         val settings = appPreferences.loadSettings()
         if (!settings.monitoringEnabled) {
-            appPreferences.appendLog("Bluetooth snapshot worker exited because monitoring is disabled.")
             return Result.success()
         }
 
         if (!BatteryMonitorEngine.hasBluetoothConnectPermission(applicationContext)) {
-            appPreferences.appendLog("Bluetooth snapshot skipped because BLUETOOTH_CONNECT is not granted.")
+            appPreferences.appendLog("Bluetooth permission missing. Cannot check device battery.")
             return Result.success()
         }
 
         val bluetoothManager = applicationContext.getSystemService(BluetoothManager::class.java)
         val adapter = bluetoothManager?.adapter
         if (adapter == null) {
-            appPreferences.appendLog("Bluetooth snapshot skipped because no Bluetooth adapter is available.")
+            appPreferences.appendLog("No Bluetooth adapter on this device.")
             return Result.success()
         }
 
         if (!adapter.isEnabled) {
-            appPreferences.appendLog("Bluetooth snapshot skipped because Bluetooth is off.")
+            appPreferences.appendLog("Bluetooth is off.")
             return Result.success()
         }
 
         val reason = inputData.getString(AppConstants.WORK_REASON).orEmpty().ifBlank { "snapshot" }
         val requestedAddress = inputData.getString(AppConstants.WORK_DEVICE_ADDRESS).orEmpty()
         val devices = collectCandidateDevices(adapter)
-        appPreferences.appendLog(
-            "Bluetooth snapshot started. reason=$reason requestedAddress=${requestedAddress.ifBlank { "<all>" }} candidates=${devices.size} bonded=${adapter.bondedDevices.size}.",
-        )
+        if (requestedAddress.isBlank()) {
+            appPreferences.appendLog("Checking connected Bluetooth devices.")
+        }
+
         var processedCount = 0
+        var requestedDeviceLabel: String? = null
         for (device in devices.values) {
             val label = BatteryMonitorEngine.displayName(
                 BatteryMonitorEngine.safeDeviceName(device),
                 device.address,
             )
+            if (requestedAddress.isNotBlank() && device.address == requestedAddress) {
+                requestedDeviceLabel = label
+            }
             val batteryLevel = BluetoothBatteryProbe.readBatteryLevel(device)
             if (batteryLevel == null) {
-                appPreferences.appendLog(
-                    "Bluetooth snapshot probe found no readable battery for $label (${device.address}).",
-                )
                 continue
             }
 
-            appPreferences.appendLog(
-                "Bluetooth snapshot probe read battery=$batteryLevel for $label (${device.address}).",
-            )
             processedCount += 1
             BatteryMonitorEngine.processSample(
                 context = applicationContext,
@@ -77,12 +75,15 @@ class SnapshotWorker(
         }
 
         if (processedCount == 0) {
+            if (requestedAddress.isNotBlank()) {
+                val label = requestedDeviceLabel ?: requestedAddress
+                appPreferences.appendLog("No battery data from $label.")
+            } else {
+                appPreferences.appendLog("No connected device exposed a readable battery level.")
+            }
+        } else if (requestedAddress.isBlank()) {
             appPreferences.appendLog(
-                "Bluetooth snapshot completed for $reason with no readable battery levels from connected accessories.",
-            )
-        } else {
-            appPreferences.appendLog(
-                "Bluetooth snapshot completed for $reason and processed $processedCount battery sample(s).",
+                "Found battery data for $processedCount connected device(s).",
             )
         }
 

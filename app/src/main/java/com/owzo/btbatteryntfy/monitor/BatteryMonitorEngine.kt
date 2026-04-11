@@ -64,59 +64,44 @@ object BatteryMonitorEngine {
 
         val settings = appPreferences.loadSettings()
         if (!settings.monitoringEnabled) {
-            appPreferences.appendLog(
-                "processSample ignored ${displayName(sample.deviceName, sample.deviceAddress)} because monitoring is disabled.",
-            )
             return
         }
 
         val deviceLabel = displayName(sample.deviceName, sample.deviceAddress)
         val timestamp = formatTimestamp(sample.observedAtMs)
         val dispatchAttemptAtMs = System.currentTimeMillis()
-        appPreferences.appendLog(
-            "processSample start device=$deviceLabel battery=${sample.batteryPercent}% source=${sample.source} low=${settings.lowThreshold}% cooldown=${settings.cooldownHours}h.",
-        )
         appPreferences.updateLastBatteryEvent(
             "Last battery event: $deviceLabel ${sample.batteryPercent}% at $timestamp",
         )
+        appPreferences.appendLog("$deviceLabel battery: ${sample.batteryPercent}%.")
 
         val identity = stableDeviceIdentity(sample.deviceName, sample.deviceAddress)
-        appPreferences.appendLog(
-            "Computed device identity for $deviceLabel as $identity.",
-        )
         if (sample.batteryPercent > settings.lowThreshold) {
-            appPreferences.appendLog(
-                "No low-battery ntfy for $deviceLabel because ${sample.batteryPercent}% is above low threshold ${settings.lowThreshold}%.",
-            )
+            appPreferences.appendLog("$deviceLabel is above the ${settings.lowThreshold}% alert limit.")
             return
         }
 
         val endpoint = NtfyClient.resolveEndpoint(settings.serverUrlOrEndpoint, settings.topic)
         if (endpoint == null) {
             appPreferences.updateLastSendResult("Last ntfy send result: invalid ntfy URL or topic")
-            appPreferences.appendLog(
-                "${shortTimestamp(sample.observedAtMs)} Low battery for $deviceLabel (${sample.batteryPercent}%) but ntfy is not configured correctly.",
-            )
+            appPreferences.appendLog("Notification skipped because ntfy is not configured correctly.")
             return
         }
 
         when (val reservation = appPreferences.reserveNotificationIfAllowed(identity, settings.cooldownMillis, dispatchAttemptAtMs)) {
             is NotificationReservation.CooldownActive -> {
                 appPreferences.appendLog(
-                    "${shortTimestamp(sample.observedAtMs)} Cooldown blocked a low-battery send for $deviceLabel until ${formatTimestamp(reservation.nextAllowedAtMs)}.",
+                    "$deviceLabel alert is on cooldown until ${formatReadableTimestamp(reservation.nextAllowedAtMs)}.",
                 )
             }
 
             is NotificationReservation.PendingSend -> {
                 appPreferences.appendLog(
-                    "${shortTimestamp(sample.observedAtMs)} Duplicate low-battery send suppressed for $deviceLabel because another send is already in flight until ${formatTimestamp(reservation.leaseExpiresAtMs)}.",
+                    "$deviceLabel alert already being sent.",
                 )
             }
 
             NotificationReservation.Reserved -> {
-                appPreferences.appendLog(
-                    "Attempting low-battery ntfy for $deviceLabel battery=${sample.batteryPercent}% endpoint=$endpoint.",
-                )
                 val result = NtfyClient.send(
                     endpoint = endpoint,
                     authorizationHeader = settings.authorizationHeader,
@@ -130,7 +115,7 @@ object BatteryMonitorEngine {
                         "Last ntfy send result: sent for $deviceLabel at ${sample.batteryPercent}%",
                     )
                     appPreferences.appendLog(
-                        "${shortTimestamp(sample.observedAtMs)} ntfy sent for $deviceLabel at ${sample.batteryPercent}% from ${sample.source}.",
+                        "Notification sent for $deviceLabel at ${sample.batteryPercent}%.",
                     )
                 } else {
                     appPreferences.clearPendingNotificationReservation(identity)
@@ -138,7 +123,7 @@ object BatteryMonitorEngine {
                         "Last ntfy send result: ${result.details}",
                     )
                     appPreferences.appendLog(
-                        "${shortTimestamp(sample.observedAtMs)} ntfy failed for $deviceLabel at ${sample.batteryPercent}%: ${result.details}.",
+                        "Notification failed for $deviceLabel: ${result.details}.",
                     )
                 }
             }
@@ -159,9 +144,6 @@ object BatteryMonitorEngine {
 
     fun formatReadableTimestamp(timestampMs: Long): String =
         readableTimestampFormatter.format(Instant.ofEpochMilli(timestampMs))
-
-    private fun shortTimestamp(timestampMs: Long): String =
-        formatTimestamp(timestampMs).substringAfter('T').substringBeforeLast(':')
 
     private fun buildLowBatteryMessage(sample: BatterySample): String {
         val deviceLabel = displayName(sample.deviceName, sample.deviceAddress)

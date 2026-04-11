@@ -3,6 +3,10 @@ package com.owzo.btbatteryntfy.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.owzo.btbatteryntfy.AppConstants
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 
@@ -58,19 +62,26 @@ class AppPreferences(context: Context) {
         prefs.edit().putString(KEY_LAST_SEND_RESULT, summary).commit()
     }
 
-    fun appendLog(message: String) = synchronized(LOCK) {
+    fun appendLog(message: String) {
+        synchronized(LOCK) {
         val sanitized = message.replace('\n', ' ').trim()
+        if (sanitized.isBlank()) {
+            return@synchronized
+        }
+
+        val entry = "${logTimeFormatter.format(Instant.now())}  $sanitized"
         val current = prefs.getString(KEY_RECENT_LOGS, "").orEmpty()
         val lines = buildList {
+            add(entry)
             if (current.isNotBlank()) {
                 addAll(current.lines().filter { it.isNotBlank() })
             }
-            add(sanitized)
-        }.takeLast(AppConstants.MAX_LOG_LINES)
+        }.take(AppConstants.MAX_LOG_LINES)
 
         prefs.edit()
             .putString(KEY_RECENT_LOGS, lines.joinToString(separator = "\n"))
             .commit()
+        }
     }
 
     fun clearLogs() = synchronized(LOCK) {
@@ -141,6 +152,8 @@ class AppPreferences(context: Context) {
         private const val KEY_LAST_SEND_RESULT = "status_last_send_result"
         private const val KEY_RECENT_LOGS = "status_recent_logs"
         private const val NOTIFICATION_PENDING_LEASE_MS = 2 * 60 * 1000L
+        private val logTimeFormatter: DateTimeFormatter =
+            DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault())
 
         private val LOCK = Any()
     }

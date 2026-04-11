@@ -28,5 +28,5 @@ object AppConstants {
     const val WORK_SOURCE = "work_source"
     const val WORK_OBSERVED_AT = "work_observed_at"
 
-    const val MAX_LOG_LINES = 80
+    const val MAX_LOG_LINES = 40
 }
