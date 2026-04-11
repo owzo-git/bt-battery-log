@@ -11,6 +11,7 @@ import android.content.Intent
 import androidx.core.content.IntentCompat
 import com.owzo.btbatteryntfy.AppConstants
 import com.owzo.btbatteryntfy.data.AppPreferences
+import com.owzo.btbatteryntfy.data.AudioProfileKey
 import kotlin.math.roundToInt
 
 class SystemEventReceiver : BroadcastReceiver() {
@@ -20,17 +21,17 @@ class SystemEventReceiver : BroadcastReceiver() {
         val appPreferences = AppPreferences(appContext)
         val settings = appPreferences.loadSettings()
         val device = extractDevice(intent)
-        val deviceLabel = BatteryMonitorEngine.displayName(
-            BatteryMonitorEngine.safeDeviceName(device),
-            device?.address,
-        )
+        val deviceName = BatteryMonitorEngine.safeDeviceName(device)
+        val deviceAddress = device?.address
+        val deviceLabel = BatteryMonitorEngine.displayName(deviceName, deviceAddress)
+        val identity = BatteryMonitorEngine.stableDeviceIdentity(deviceName, deviceAddress)
 
         when (action) {
             Intent.ACTION_BOOT_COMPLETED,
             Intent.ACTION_MY_PACKAGE_REPLACED,
             -> {
                 if (settings.monitoringEnabled) {
-                    appPreferences.appendLog("Phone restarted. Checking connected devices.")
+                    appPreferences.appendLog("Phone restarted. Checking connected headphones.")
                     MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = action)
                 }
             }
@@ -42,32 +43,40 @@ class SystemEventReceiver : BroadcastReceiver() {
 
                 val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
                 if (state == BluetoothAdapter.STATE_ON) {
-                    appPreferences.appendLog("Bluetooth turned on. Checking connected devices.")
+                    appPreferences.appendLog("Bluetooth turned on. Checking connected headphones.")
                     MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = "adapter_on")
                 }
             }
 
-            BluetoothAdapter.ACTION_CONNECTION_STATE_CHANGED -> {
-                if (!settings.monitoringEnabled) {
+            BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                if (!settings.monitoringEnabled || !shouldTrackDevice(appPreferences, identity, device)) {
                     return
                 }
 
-                handleAdapterConnectionStateChange(
-                    intent = intent,
-                    appContext = appContext,
+                MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
+                appPreferences.appendLog("$deviceLabel connected. Checking battery.")
+                MonitoringWorkScheduler.enqueueSnapshot(
+                    context = appContext,
+                    reason = "acl_connected",
+                    deviceAddress = deviceAddress,
                 )
             }
 
-            BluetoothDevice.ACTION_ACL_CONNECTED -> {
-                if (!settings.monitoringEnabled) {
+            BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                if (!settings.monitoringEnabled || !shouldTrackDevice(appPreferences, identity, device)) {
                     return
                 }
 
-                appPreferences.appendLog("$deviceLabel connected. Checking battery.")
-                MonitoringWorkScheduler.enqueueSnapshot(
-                    appContext,
-                    reason = "acl_connected",
-                    deviceAddress = device?.address,
+                appPreferences.markAllAudioProfilesDisconnected(identity, deviceName, deviceAddress)
+                scheduleDisconnectCheck(
+                    appContext = appContext,
+                    appPreferences = appPreferences,
+                    settings = settings,
+                    deviceIdentity = identity,
+                    deviceName = deviceName,
+                    deviceAddress = deviceAddress,
+                    deviceLabel = deviceLabel,
+                    reason = "acl_disconnected",
                 )
             }
 
@@ -77,9 +86,16 @@ class SystemEventReceiver : BroadcastReceiver() {
                 }
 
                 handleProfileConnectionStateChange(
-                    intent = intent,
                     appContext = appContext,
+                    appPreferences = appPreferences,
+                    settings = settings,
+                    device = device,
+                    profileKey = AudioProfileKey.A2DP,
                     source = "a2dp",
+                    state = intent.getIntExtra(
+                        BluetoothProfile.EXTRA_STATE,
+                        BluetoothProfile.STATE_DISCONNECTED,
+                    ),
                 )
             }
 
@@ -89,14 +105,20 @@ class SystemEventReceiver : BroadcastReceiver() {
                 }
 
                 handleProfileConnectionStateChange(
-                    intent = intent,
                     appContext = appContext,
+                    appPreferences = appPreferences,
+                    settings = settings,
+                    device = device,
+                    profileKey = AudioProfileKey.HEADSET,
                     source = "headset",
+                    state = intent.getIntExtra(
+                        BluetoothProfile.EXTRA_STATE,
+                        BluetoothProfile.STATE_DISCONNECTED,
+                    ),
                 )
             }
 
             AppConstants.ACTION_BATTERY_LEVEL_CHANGED -> {
-                val battery = intent.getIntExtra(AppConstants.EXTRA_BATTERY_LEVEL, -1)
                 if (!settings.monitoringEnabled) {
                     return
                 }
@@ -104,18 +126,18 @@ class SystemEventReceiver : BroadcastReceiver() {
                 enqueueSampleIfValid(
                     appContext = appContext,
                     device = device,
-                    batteryPercent = battery,
+                    batteryPercent = intent.getIntExtra(AppConstants.EXTRA_BATTERY_LEVEL, -1),
                     source = "battery_broadcast",
                 )
             }
 
             AppConstants.ACTION_HF_INDICATORS_VALUE_CHANGED -> {
-                val indicatorId = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_ID, -1)
-                val value = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_VALUE, -1)
                 if (!settings.monitoringEnabled) {
                     return
                 }
 
+                val indicatorId = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_ID, -1)
+                val value = intent.getIntExtra(AppConstants.EXTRA_HF_INDICATOR_VALUE, -1)
                 if (indicatorId == AppConstants.HF_BATTERY_INDICATOR_ID) {
                     enqueueSampleIfValid(
                         appContext = appContext,
@@ -127,20 +149,108 @@ class SystemEventReceiver : BroadcastReceiver() {
             }
 
             BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT -> {
-                val batteryPercent = parseVendorSpecificBattery(intent)
                 if (!settings.monitoringEnabled) {
                     return
                 }
 
-                val validBatteryPercent = batteryPercent ?: return
+                val batteryPercent = parseVendorSpecificBattery(intent) ?: return
                 enqueueSampleIfValid(
                     appContext = appContext,
                     device = device,
-                    batteryPercent = validBatteryPercent,
+                    batteryPercent = batteryPercent,
                     source = "vendor_headset_event",
                 )
             }
         }
+    }
+
+    private fun handleProfileConnectionStateChange(
+        appContext: Context,
+        appPreferences: AppPreferences,
+        settings: com.owzo.btbatteryntfy.data.AppSettings,
+        device: BluetoothDevice?,
+        profileKey: AudioProfileKey,
+        source: String,
+        state: Int,
+    ) {
+        val deviceName = BatteryMonitorEngine.safeDeviceName(device)
+        val deviceAddress = device?.address
+        val deviceLabel = BatteryMonitorEngine.displayName(deviceName, deviceAddress)
+        val identity = BatteryMonitorEngine.stableDeviceIdentity(deviceName, deviceAddress)
+
+        when (state) {
+            BluetoothProfile.STATE_CONNECTED -> {
+                appPreferences.markAudioProfileConnection(
+                    deviceIdentity = identity,
+                    deviceName = deviceName,
+                    deviceAddress = deviceAddress,
+                    profileKey = profileKey,
+                    connected = true,
+                )
+                MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
+                appPreferences.appendLog("$deviceLabel connected. Checking battery.")
+                MonitoringWorkScheduler.enqueueSnapshot(
+                    context = appContext,
+                    reason = "${source}_connected",
+                    deviceAddress = deviceAddress,
+                )
+            }
+
+            BluetoothProfile.STATE_DISCONNECTED -> {
+                appPreferences.markAudioProfileConnection(
+                    deviceIdentity = identity,
+                    deviceName = deviceName,
+                    deviceAddress = deviceAddress,
+                    profileKey = profileKey,
+                    connected = false,
+                )
+
+                if (!appPreferences.getTrackedDeviceState(identity).isAudioSessionActive) {
+                    scheduleDisconnectCheck(
+                        appContext = appContext,
+                        appPreferences = appPreferences,
+                        settings = settings,
+                        deviceIdentity = identity,
+                        deviceName = deviceName,
+                        deviceAddress = deviceAddress,
+                        deviceLabel = deviceLabel,
+                        reason = "${source}_disconnected",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun scheduleDisconnectCheck(
+        appContext: Context,
+        appPreferences: AppPreferences,
+        settings: com.owzo.btbatteryntfy.data.AppSettings,
+        deviceIdentity: String,
+        deviceName: String?,
+        deviceAddress: String?,
+        deviceLabel: String,
+        reason: String,
+    ) {
+        appPreferences.appendLog(
+            "$deviceLabel disconnected. Waiting ${settings.disconnectDelaySeconds}s before sending battery summary.",
+        )
+        MonitoringWorkScheduler.enqueueDisconnectCheck(
+            context = appContext,
+            deviceIdentity = deviceIdentity,
+            deviceName = deviceName,
+            deviceAddress = deviceAddress,
+            reason = reason,
+            delayMillis = settings.disconnectDelayMillis,
+        )
+    }
+
+    private fun shouldTrackDevice(
+        appPreferences: AppPreferences,
+        deviceIdentity: String,
+        device: BluetoothDevice?,
+    ): Boolean {
+        val knownState = appPreferences.getTrackedDeviceState(deviceIdentity)
+        return knownState.knownAudioDevice || BatteryMonitorEngine.isLikelyHeadphones(device)
     }
 
     private fun enqueueSampleIfValid(
@@ -163,40 +273,6 @@ class SystemEventReceiver : BroadcastReceiver() {
                 source = source,
             ),
         )
-    }
-
-    private fun handleProfileConnectionStateChange(
-        intent: Intent,
-        appContext: Context,
-        source: String,
-    ) {
-        val state = intent.getIntExtra(BluetoothProfile.EXTRA_STATE, BluetoothProfile.STATE_DISCONNECTED)
-        val device = extractDevice(intent)
-        if (state == BluetoothProfile.STATE_CONNECTED) {
-            MonitoringWorkScheduler.enqueueSnapshot(
-                context = appContext,
-                reason = "${source}_connected",
-                deviceAddress = device?.address,
-            )
-        }
-    }
-
-    private fun handleAdapterConnectionStateChange(
-        intent: Intent,
-        appContext: Context,
-    ) {
-        val state = intent.getIntExtra(
-            BluetoothAdapter.EXTRA_CONNECTION_STATE,
-            BluetoothAdapter.STATE_DISCONNECTED,
-        )
-        val device = extractDevice(intent)
-        if (state == BluetoothAdapter.STATE_CONNECTED) {
-            MonitoringWorkScheduler.enqueueSnapshot(
-                context = appContext,
-                reason = "adapter_connected",
-                deviceAddress = device?.address,
-            )
-        }
     }
 
     private fun extractDevice(intent: Intent): BluetoothDevice? =

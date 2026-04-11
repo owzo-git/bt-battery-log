@@ -1,20 +1,29 @@
 # BT Battery Ntfy
 
-BT Battery Ntfy is a minimal Android utility app that listens for Bluetooth accessory battery updates and sends an `ntfy` POST when a connected device reports battery at or below a configured threshold.
+BT Battery Ntfy is a minimal Android utility app that tracks headphone battery while the headphones are connected and sends an `ntfy` POST with the last seen percentage after they disconnect.
 
 The app stores:
 
-- ntfy settings and thresholds
+- ntfy settings
 - whether monitoring is enabled
-- per-device last notified battery and timestamp
-- a cooldown timestamp used to suppress duplicate sends
+- disconnect delay and cooldown settings
+- per-device last seen battery and timestamp
+- per-device audio session state
 - recent debug log lines
 
 ## What It Does
 
 - Watches Bluetooth battery updates using Android Bluetooth broadcasts where available.
-- Ignores devices that do not expose a battery percentage.
-- Sends an ntfy alert when a device battery is at or below the configured threshold, then suppresses repeats for that device until the cooldown expires.
+- Focuses on headphone-style Bluetooth audio devices.
+- Remembers the last battery percentage seen during a listening session.
+- When the headphones disconnect, waits a short configurable delay, confirms they did not reconnect, and then sends an ntfy summary such as:
+
+```text
+Shokz OpenRun Pro 2
+Battery: 50% @ 2026-04-11 16:52
+```
+
+- Uses a cooldown per device to suppress duplicate summaries caused by reconnect glitches.
 - Restores monitoring behavior after reboot if monitoring is enabled.
 - Includes a simple autosaving settings screen, a manual refresh button, a test send button, status lines, and a recent-event log.
 
@@ -70,6 +79,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ## Known Limitations
 
 - Bluetooth battery reporting is inconsistent across accessories and Android versions.
+- Disconnect detection for third-party apps is best-effort. Most headphones expose usable profile disconnect events, but some phones or accessories may behave inconsistently.
 - Some devices expose battery through system broadcasts, some only through vendor-specific headset events, and some do not expose it to third-party apps at all.
 - The startup snapshot uses a best-effort reflective battery probe because Android's public SDK does not expose a normal battery getter for all Bluetooth devices.
 - Force-stopping the app from system settings can prevent the system from delivering future broadcasts until the app is opened again.

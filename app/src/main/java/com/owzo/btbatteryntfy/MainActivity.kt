@@ -2,11 +2,9 @@ package com.owzo.btbatteryntfy
 
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothA2dp
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothHeadset
 import android.bluetooth.BluetoothManager
-import android.bluetooth.BluetoothProfile
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -47,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         appPreferences.appendLog(
-            "No Bluetooth events seen while the app was open. Use Refresh now to run a direct battery check.",
+            "No headphone events seen while the app was open. Use Refresh now to check connected devices.",
         )
     }
     private val foregroundDebugReceiver = object : BroadcastReceiver() {
@@ -131,7 +129,7 @@ class MainActivity : AppCompatActivity() {
                 if (isChecked) {
                     val settings = appPreferences.loadSettings()
                     appPreferences.appendLog(
-                        "Monitoring enabled from UI. low=${settings.lowThreshold}% cooldown=${settings.cooldownHours}h. Scheduling Bluetooth snapshot.",
+                        "Monitoring enabled. Disconnect delay=${settings.disconnectDelaySeconds}s, cooldown=${settings.cooldownHours}h. Checking connected headphones.",
                     )
                     MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "settings_saved")
                 } else {
@@ -143,8 +141,8 @@ class MainActivity : AppCompatActivity() {
         setupAutosaveTextField(binding.serverInput)
         setupAutosaveTextField(binding.topicInput)
         setupAutosaveTextField(binding.authInput)
-        setupAutosaveTextField(binding.lowThresholdInput)
         setupAutosaveTextField(binding.cooldownHoursInput)
+        setupAutosaveTextField(binding.disconnectDelayInput)
 
         binding.saveButton.setOnClickListener {
             if (!binding.monitoringSwitch.isChecked) {
@@ -172,8 +170,8 @@ class MainActivity : AppCompatActivity() {
         binding.serverInput.setText(settings.serverUrlOrEndpoint)
         binding.topicInput.setText(settings.topic)
         binding.authInput.setText(settings.authorizationHeader)
-        binding.lowThresholdInput.setText(settings.lowThreshold.toString())
         binding.cooldownHoursInput.setText(settings.cooldownHours.toString())
+        binding.disconnectDelayInput.setText(settings.disconnectDelaySeconds.toString())
         binding.monitoringSwitch.isChecked = settings.monitoringEnabled
         suppressAutoSave = false
     }
@@ -215,7 +213,7 @@ class MainActivity : AppCompatActivity() {
             )
 
             if (endpoint == null) {
-                appPreferences.updateLastSendResult("Last ntfy send result: invalid ntfy URL or topic")
+                appPreferences.updateLastSendResult("Last disconnect summary: invalid ntfy URL or topic")
                 appPreferences.appendLog("Test notification skipped because ntfy is not configured correctly.")
                 runOnUiThread {
                     showSnackbar("Set a valid ntfy URL first.")
@@ -229,20 +227,22 @@ class MainActivity : AppCompatActivity() {
                 authorizationHeader = ephemeralSettings.authorizationHeader,
                 title = "BT Battery Ntfy test",
                 message = buildString {
-                    append("BT Battery Ntfy test notification\n\n")
-                    append("Timestamp: ")
-                    append(com.owzo.btbatteryntfy.monitor.BatteryMonitorEngine.formatTimestamp(now))
+                    append("Shokz OpenRun Pro 2")
                     append('\n')
-                    append("Low threshold: ${ephemeralSettings.lowThreshold}%\n")
+                    append("Battery: 50% @ ")
+                    append(BatteryMonitorEngine.formatNotificationTimestamp(now))
+                    append('\n')
+                    append('\n')
+                    append("Disconnect delay: ${ephemeralSettings.disconnectDelaySeconds}s\n")
                     append("Cooldown: ${ephemeralSettings.cooldownHours} hour(s)")
                 },
             )
 
             if (result.success) {
-                appPreferences.updateLastSendResult("Last ntfy send result: test notification sent")
+                appPreferences.updateLastSendResult("Last disconnect summary: test notification sent")
                 appPreferences.appendLog("Test ntfy notification sent successfully.")
             } else {
-                appPreferences.updateLastSendResult("Last ntfy send result: ${result.details}")
+                appPreferences.updateLastSendResult("Last disconnect summary: ${result.details}")
                 appPreferences.appendLog("Test ntfy notification failed: ${result.details}.")
             }
 
@@ -261,25 +261,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun collectSettings(monitoringEnabled: Boolean): AppSettings {
-        val lowThreshold = parseInt(
-            binding.lowThresholdInput.text?.toString(),
-            AppSettings.DEFAULT_LOW_THRESHOLD,
-            min = 1,
-            max = 100,
-        )
         val cooldownHours = parseInt(
             binding.cooldownHoursInput.text?.toString(),
             AppSettings.DEFAULT_COOLDOWN_HOURS,
             min = 1,
             max = 720,
         )
+        val disconnectDelaySeconds = parseInt(
+            binding.disconnectDelayInput.text?.toString(),
+            AppSettings.DEFAULT_DISCONNECT_DELAY_SECONDS,
+            min = 5,
+            max = 300,
+        )
 
         return AppSettings(
             serverUrlOrEndpoint = binding.serverInput.text?.toString().orEmpty().trim(),
             topic = binding.topicInput.text?.toString().orEmpty().trim(),
             authorizationHeader = binding.authInput.text?.toString().orEmpty().trim(),
-            lowThreshold = lowThreshold,
             cooldownHours = cooldownHours,
+            disconnectDelaySeconds = disconnectDelaySeconds,
             monitoringEnabled = monitoringEnabled,
         )
     }
@@ -305,6 +305,8 @@ class MainActivity : AppCompatActivity() {
         val filter = IntentFilter().apply {
             addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
             addAction(BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED)
             addAction(AppConstants.ACTION_BATTERY_LEVEL_CHANGED)
             addAction(AppConstants.ACTION_HF_INDICATORS_VALUE_CHANGED)
             addAction(BluetoothHeadset.ACTION_VENDOR_SPECIFIC_HEADSET_EVENT)
@@ -338,7 +340,7 @@ class MainActivity : AppCompatActivity() {
         )
 
         if (settings.monitoringEnabled && permissionState == "granted" && bluetoothState == "on") {
-            appPreferences.appendLog("App opened. Checking connected devices.")
+            appPreferences.appendLog("App opened. Checking connected headphones.")
             MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "activity_visible")
         }
 
@@ -382,6 +384,12 @@ class MainActivity : AppCompatActivity() {
 
             BluetoothDevice.ACTION_ACL_CONNECTED ->
                 "$deviceLabel connected."
+
+            BluetoothDevice.ACTION_ACL_DISCONNECTED ->
+                "$deviceLabel disconnect signal seen."
+
+            BluetoothHeadset.ACTION_CONNECTION_STATE_CHANGED ->
+                "$deviceLabel headset state changed."
 
             AppConstants.ACTION_BATTERY_LEVEL_CHANGED -> {
                 val battery = intent.getIntExtra(AppConstants.EXTRA_BATTERY_LEVEL, -1)

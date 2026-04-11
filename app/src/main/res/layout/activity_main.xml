@@ -99,20 +99,6 @@
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/lowThresholdInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/low_threshold_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/lowThresholdInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/cooldownHoursInputLayout"
             style="@style/Widget.BtBatteryNtfy.TextInputLayout"
             android:layout_width="match_parent"
@@ -121,6 +107,20 @@
 
             <com.google.android.material.textfield.TextInputEditText
                 android:id="@+id/cooldownHoursInput"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:inputType="number" />
+        </com.google.android.material.textfield.TextInputLayout>
+
+        <com.google.android.material.textfield.TextInputLayout
+            android:id="@+id/disconnectDelayInputLayout"
+            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/disconnect_delay_label">
+
+            <com.google.android.material.textfield.TextInputEditText
+                android:id="@+id/disconnectDelayInput"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:inputType="number" />

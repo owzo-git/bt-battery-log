@@ -22,6 +22,7 @@ object AppConstants {
     const val XEVENT_BATTERY_KEYWORD = "BATTERY"
 
     const val WORK_REASON = "work_reason"
+    const val WORK_DEVICE_IDENTITY = "work_device_identity"
     const val WORK_DEVICE_ADDRESS = "work_device_address"
     const val WORK_DEVICE_NAME = "work_device_name"
     const val WORK_BATTERY_LEVEL = "work_battery_level"

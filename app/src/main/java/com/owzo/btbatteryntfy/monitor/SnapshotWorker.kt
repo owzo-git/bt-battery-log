@@ -43,7 +43,7 @@ class SnapshotWorker(
         val requestedAddress = inputData.getString(AppConstants.WORK_DEVICE_ADDRESS).orEmpty()
         val devices = collectCandidateDevices(adapter)
         if (requestedAddress.isBlank()) {
-            appPreferences.appendLog("Checking connected Bluetooth devices.")
+            appPreferences.appendLog("Checking connected headphones.")
         }
 
         var processedCount = 0
@@ -53,8 +53,18 @@ class SnapshotWorker(
                 BatteryMonitorEngine.safeDeviceName(device),
                 device.address,
             )
+            val identity = BatteryMonitorEngine.stableDeviceIdentity(
+                BatteryMonitorEngine.safeDeviceName(device),
+                device.address,
+            )
             if (requestedAddress.isNotBlank() && device.address == requestedAddress) {
                 requestedDeviceLabel = label
+            }
+            if (requestedAddress.isBlank()) {
+                val trackedState = appPreferences.getTrackedDeviceState(identity)
+                if (!trackedState.knownAudioDevice && !BatteryMonitorEngine.isLikelyHeadphones(device)) {
+                    continue
+                }
             }
             val batteryLevel = BluetoothBatteryProbe.readBatteryLevel(device)
             if (batteryLevel == null) {
@@ -79,11 +89,11 @@ class SnapshotWorker(
                 val label = requestedDeviceLabel ?: requestedAddress
                 appPreferences.appendLog("No battery data from $label.")
             } else {
-                appPreferences.appendLog("No connected device exposed a readable battery level.")
+                appPreferences.appendLog("No connected headphones exposed a readable battery level.")
             }
         } else if (requestedAddress.isBlank()) {
             appPreferences.appendLog(
-                "Found battery data for $processedCount connected device(s).",
+                "Found battery data for $processedCount connected headphone(s).",
             )
         }
 

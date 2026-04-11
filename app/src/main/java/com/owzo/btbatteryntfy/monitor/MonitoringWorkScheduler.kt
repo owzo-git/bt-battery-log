@@ -7,6 +7,7 @@ import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.owzo.btbatteryntfy.AppConstants
+import java.util.concurrent.TimeUnit
 
 object MonitoringWorkScheduler {
     fun enqueueSnapshot(
@@ -47,5 +48,41 @@ object MonitoringWorkScheduler {
             .build()
 
         WorkManager.getInstance(context.applicationContext).enqueue(request)
+    }
+
+    fun enqueueDisconnectCheck(
+        context: Context,
+        deviceIdentity: String,
+        deviceName: String?,
+        deviceAddress: String?,
+        reason: String,
+        delayMillis: Long,
+    ) {
+        val request = OneTimeWorkRequestBuilder<DisconnectCheckWorker>()
+            .setInputData(
+                workDataOf(
+                    AppConstants.WORK_DEVICE_IDENTITY to deviceIdentity,
+                    AppConstants.WORK_DEVICE_NAME to deviceName.orEmpty(),
+                    AppConstants.WORK_DEVICE_ADDRESS to deviceAddress.orEmpty(),
+                    AppConstants.WORK_REASON to reason,
+                ),
+            )
+            .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
+            .build()
+
+        WorkManager.getInstance(context.applicationContext)
+            .enqueueUniqueWork(
+                "disconnect:${deviceIdentity}",
+                ExistingWorkPolicy.REPLACE,
+                request,
+            )
+    }
+
+    fun cancelDisconnectCheck(
+        context: Context,
+        deviceIdentity: String,
+    ) {
+        WorkManager.getInstance(context.applicationContext)
+            .cancelUniqueWork("disconnect:${deviceIdentity}")
     }
 }
