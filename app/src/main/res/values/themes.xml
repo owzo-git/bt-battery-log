@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.BtBatteryNtfy" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorPrimaryContainer">@color/primary_container</item>
+        <item name="colorOnPrimaryContainer">@color/on_primary_container</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="colorOutline">@color/outline</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@color/background</item>
+    </style>
+
+    <style name="Widget.BtBatteryNtfy.TextInputLayout" parent="Widget.Material3.TextInputLayout.OutlinedBox">
+        <item name="android:layout_marginTop">12dp</item>
+    </style>
+
+    <style name="Widget.BtBatteryNtfy.ActionButton" parent="Widget.Material3.Button">
+        <item name="android:layout_marginTop">10dp</item>
+    </style>
+
+    <style name="Widget.BtBatteryNtfy.SecondaryButton" parent="Widget.Material3.Button.OutlinedButton">
+        <item name="android:layout_marginTop">10dp</item>
+    </style>
+</resources>
