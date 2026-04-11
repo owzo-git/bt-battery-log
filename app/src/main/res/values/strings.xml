@@ -7,9 +7,8 @@
     <string name="topic_label">Topic (leave blank if the URL already includes it)</string>
     <string name="auth_label">Authorization header or raw user:pass (optional)</string>
     <string name="low_threshold_label">Low battery threshold (%)</string>
-    <string name="reset_threshold_label">Reset threshold (%)</string>
     <string name="cooldown_hours_label">Cooldown hours</string>
-    <string name="save_settings">Save settings</string>
+    <string name="save_settings">Refresh now</string>
     <string name="send_test_notification">Send test notification</string>
     <string name="clear_debug_logs">Clear debug logs</string>
     <string name="debug_log_header">Recent events</string>

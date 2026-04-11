@@ -12,6 +12,7 @@ import com.owzo.btbatteryntfy.net.NtfyClient
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
 import java.util.Locale
 
 data class BatterySample(
@@ -25,6 +26,9 @@ data class BatterySample(
 object BatteryMonitorEngine {
     private val timestampFormatter: DateTimeFormatter =
         DateTimeFormatter.ISO_OFFSET_DATE_TIME.withZone(ZoneId.systemDefault())
+    private val readableTimestampFormatter: DateTimeFormatter =
+        DateTimeFormatter.ofLocalizedDateTime(FormatStyle.MEDIUM, FormatStyle.SHORT)
+            .withZone(ZoneId.systemDefault())
 
     fun hasBluetoothConnectPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -50,33 +54,40 @@ object BatteryMonitorEngine {
     }
 
     fun processSample(context: Context, sample: BatterySample) {
+        val appPreferences = AppPreferences(context)
         if (sample.batteryPercent !in 0..100) {
+            appPreferences.appendLog(
+                "processSample ignored invalid battery=${sample.batteryPercent} source=${sample.source}.",
+            )
             return
         }
 
-        val appPreferences = AppPreferences(context)
         val settings = appPreferences.loadSettings()
         if (!settings.monitoringEnabled) {
+            appPreferences.appendLog(
+                "processSample ignored ${displayName(sample.deviceName, sample.deviceAddress)} because monitoring is disabled.",
+            )
             return
         }
 
         val deviceLabel = displayName(sample.deviceName, sample.deviceAddress)
         val timestamp = formatTimestamp(sample.observedAtMs)
+        val dispatchAttemptAtMs = System.currentTimeMillis()
+        appPreferences.appendLog(
+            "processSample start device=$deviceLabel battery=${sample.batteryPercent}% source=${sample.source} low=${settings.lowThreshold}% cooldown=${settings.cooldownHours}h.",
+        )
         appPreferences.updateLastBatteryEvent(
             "Last battery event: $deviceLabel ${sample.batteryPercent}% at $timestamp",
         )
 
         val identity = stableDeviceIdentity(sample.deviceName, sample.deviceAddress)
-        if (sample.batteryPercent > settings.resetThreshold) {
-            if (appPreferences.clearNotificationLatchIfRecovered(identity)) {
-                appPreferences.appendLog(
-                    "${shortTimestamp(sample.observedAtMs)} $deviceLabel recovered to ${sample.batteryPercent}% and notifications were re-armed.",
-                )
-            }
-            return
-        }
-
+        appPreferences.appendLog(
+            "Computed device identity for $deviceLabel as $identity.",
+        )
         if (sample.batteryPercent > settings.lowThreshold) {
+            appPreferences.appendLog(
+                "No low-battery ntfy for $deviceLabel because ${sample.batteryPercent}% is above low threshold ${settings.lowThreshold}%.",
+            )
             return
         }
 
@@ -89,29 +100,32 @@ object BatteryMonitorEngine {
             return
         }
 
-        when (val reservation = appPreferences.reserveNotificationIfAllowed(identity, settings.cooldownMillis, sample.observedAtMs)) {
-            NotificationReservation.AlreadyNotified -> {
-                appPreferences.appendLog(
-                    "${shortTimestamp(sample.observedAtMs)} Skipped duplicate low-battery send for $deviceLabel at ${sample.batteryPercent}%.",
-                )
-            }
-
+        when (val reservation = appPreferences.reserveNotificationIfAllowed(identity, settings.cooldownMillis, dispatchAttemptAtMs)) {
             is NotificationReservation.CooldownActive -> {
                 appPreferences.appendLog(
                     "${shortTimestamp(sample.observedAtMs)} Cooldown blocked a low-battery send for $deviceLabel until ${formatTimestamp(reservation.nextAllowedAtMs)}.",
                 )
             }
 
+            is NotificationReservation.PendingSend -> {
+                appPreferences.appendLog(
+                    "${shortTimestamp(sample.observedAtMs)} Duplicate low-battery send suppressed for $deviceLabel because another send is already in flight until ${formatTimestamp(reservation.leaseExpiresAtMs)}.",
+                )
+            }
+
             NotificationReservation.Reserved -> {
+                appPreferences.appendLog(
+                    "Attempting low-battery ntfy for $deviceLabel battery=${sample.batteryPercent}% endpoint=$endpoint.",
+                )
                 val result = NtfyClient.send(
                     endpoint = endpoint,
                     authorizationHeader = settings.authorizationHeader,
-                    title = "BT battery low: $deviceLabel ${sample.batteryPercent}%",
+                    title = "$deviceLabel ${sample.batteryPercent}%",
                     message = buildLowBatteryMessage(sample),
                 )
 
                 if (result.success) {
-                    appPreferences.markNotificationSent(identity, sample.batteryPercent, sample.observedAtMs)
+                    appPreferences.markNotificationSent(identity, sample.batteryPercent, dispatchAttemptAtMs)
                     appPreferences.updateLastSendResult(
                         "Last ntfy send result: sent for $deviceLabel at ${sample.batteryPercent}%",
                     )
@@ -119,6 +133,7 @@ object BatteryMonitorEngine {
                         "${shortTimestamp(sample.observedAtMs)} ntfy sent for $deviceLabel at ${sample.batteryPercent}% from ${sample.source}.",
                     )
                 } else {
+                    appPreferences.clearPendingNotificationReservation(identity)
                     appPreferences.updateLastSendResult(
                         "Last ntfy send result: ${result.details}",
                     )
@@ -142,20 +157,21 @@ object BatteryMonitorEngine {
     fun formatTimestamp(timestampMs: Long): String =
         timestampFormatter.format(Instant.ofEpochMilli(timestampMs))
 
+    fun formatReadableTimestamp(timestampMs: Long): String =
+        readableTimestampFormatter.format(Instant.ofEpochMilli(timestampMs))
+
     private fun shortTimestamp(timestampMs: Long): String =
         formatTimestamp(timestampMs).substringAfter('T').substringBeforeLast(':')
 
     private fun buildLowBatteryMessage(sample: BatterySample): String {
         val deviceLabel = displayName(sample.deviceName, sample.deviceAddress)
         val lines = mutableListOf<String>()
-        lines += "Bluetooth device battery low"
-        lines += ""
-        lines += "Device: $deviceLabel"
-        lines += "Address: ${sample.deviceAddress ?: "Unavailable"}"
+        lines += "$deviceLabel"
         lines += "Battery: ${sample.batteryPercent}%"
-        lines += "Timestamp: ${formatTimestamp(sample.observedAtMs)}"
-        lines += "Source: ${sample.source}"
+        lines += formatReadableTimestamp(sample.observedAtMs)
+        if (!sample.deviceAddress.isNullOrBlank()) {
+            lines += "Address: ${sample.deviceAddress}"
+        }
         return lines.joinToString(separator = "\n")
     }
 }
-

@@ -6,7 +6,6 @@ The app stores:
 
 - ntfy settings and thresholds
 - whether monitoring is enabled
-- per-device low-battery notification state
 - per-device last notified battery and timestamp
 - a cooldown timestamp used to suppress duplicate sends
 - recent debug log lines
@@ -15,10 +14,9 @@ The app stores:
 
 - Watches Bluetooth battery updates using Android Bluetooth broadcasts where available.
 - Ignores devices that do not expose a battery percentage.
-- Sends one ntfy alert per low-battery cycle for each device.
-- Does not alert again for that device until the battery rises above the configured reset threshold.
+- Sends an ntfy alert when a device battery is at or below the configured threshold, then suppresses repeats for that device until the cooldown expires.
 - Restores monitoring behavior after reboot if monitoring is enabled.
-- Includes a simple settings screen, a test send button, status lines, and a recent-event log.
+- Includes a simple autosaving settings screen, a manual refresh button, a test send button, status lines, and a recent-event log.
 
 ## Android Permissions Used
 
@@ -74,5 +72,4 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - Bluetooth battery reporting is inconsistent across accessories and Android versions.
 - Some devices expose battery through system broadcasts, some only through vendor-specific headset events, and some do not expose it to third-party apps at all.
 - The startup snapshot uses a best-effort reflective battery probe because Android's public SDK does not expose a normal battery getter for all Bluetooth devices.
-- If a device never reports a recovery value above the reset threshold, the app will keep that device latched in its already-notified state.
 - Force-stopping the app from system settings can prevent the system from delivering future broadcasts until the app is opened again.

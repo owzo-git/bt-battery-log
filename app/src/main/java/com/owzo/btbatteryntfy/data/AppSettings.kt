@@ -5,7 +5,6 @@ data class AppSettings(
     val topic: String = "",
     val authorizationHeader: String = "",
     val lowThreshold: Int = DEFAULT_LOW_THRESHOLD,
-    val resetThreshold: Int = DEFAULT_RESET_THRESHOLD,
     val cooldownHours: Int = DEFAULT_COOLDOWN_HOURS,
     val monitoringEnabled: Boolean = false,
 ) {
@@ -14,7 +13,6 @@ data class AppSettings(
 
     companion object {
         const val DEFAULT_LOW_THRESHOLD = 40
-        const val DEFAULT_RESET_THRESHOLD = 45
         const val DEFAULT_COOLDOWN_HOURS = 12
     }
 }
@@ -24,4 +22,3 @@ data class StatusSnapshot(
     val lastSendResult: String,
     val logText: String,
 )
-

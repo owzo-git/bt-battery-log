@@ -8,8 +8,8 @@ import java.security.MessageDigest
 
 sealed interface NotificationReservation {
     data object Reserved : NotificationReservation
-    data object AlreadyNotified : NotificationReservation
     data class CooldownActive(val nextAllowedAtMs: Long) : NotificationReservation
+    data class PendingSend(val leaseExpiresAtMs: Long) : NotificationReservation
 }
 
 class AppPreferences(context: Context) {
@@ -22,7 +22,6 @@ class AppPreferences(context: Context) {
             topic = prefs.getString(KEY_TOPIC, "").orEmpty(),
             authorizationHeader = prefs.getString(KEY_AUTHORIZATION, "").orEmpty(),
             lowThreshold = prefs.getInt(KEY_LOW_THRESHOLD, AppSettings.DEFAULT_LOW_THRESHOLD),
-            resetThreshold = prefs.getInt(KEY_RESET_THRESHOLD, AppSettings.DEFAULT_RESET_THRESHOLD),
             cooldownHours = prefs.getInt(KEY_COOLDOWN_HOURS, AppSettings.DEFAULT_COOLDOWN_HOURS),
             monitoringEnabled = prefs.getBoolean(KEY_MONITORING_ENABLED, false),
         )
@@ -34,7 +33,6 @@ class AppPreferences(context: Context) {
             .putString(KEY_TOPIC, settings.topic.trim())
             .putString(KEY_AUTHORIZATION, settings.authorizationHeader.trim())
             .putInt(KEY_LOW_THRESHOLD, settings.lowThreshold)
-            .putInt(KEY_RESET_THRESHOLD, settings.resetThreshold)
             .putInt(KEY_COOLDOWN_HOURS, settings.cooldownHours)
             .putBoolean(KEY_MONITORING_ENABLED, settings.monitoringEnabled)
             .commit()
@@ -79,36 +77,25 @@ class AppPreferences(context: Context) {
         prefs.edit().putString(KEY_RECENT_LOGS, "").commit()
     }
 
-    fun clearNotificationLatchIfRecovered(deviceIdentity: String): Boolean = synchronized(LOCK) {
-        val base = deviceBase(deviceIdentity)
-        val alreadyNotified = prefs.getBoolean("${base}_already_notified", false)
-        val lastDispatchMs = prefs.getLong("${base}_last_dispatch_ms", 0L)
-        if (!alreadyNotified && lastDispatchMs == 0L) {
-            return false
-        }
-
-        prefs.edit()
-            .putBoolean("${base}_already_notified", false)
-            .putLong("${base}_last_dispatch_ms", 0L)
-            .commit()
-    }
-
     fun reserveNotificationIfAllowed(
         deviceIdentity: String,
         cooldownMillis: Long,
         nowMs: Long,
     ): NotificationReservation = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
-        if (prefs.getBoolean("${base}_already_notified", false)) {
-            return NotificationReservation.AlreadyNotified
-        }
-
         val lastDispatchMs = prefs.getLong("${base}_last_dispatch_ms", 0L)
         if (lastDispatchMs > 0L && nowMs - lastDispatchMs < cooldownMillis) {
             return NotificationReservation.CooldownActive(lastDispatchMs + cooldownMillis)
         }
 
-        prefs.edit().putLong("${base}_last_dispatch_ms", nowMs).commit()
+        val pendingUntilMs = prefs.getLong("${base}_pending_send_until_ms", 0L)
+        if (pendingUntilMs > nowMs) {
+            return NotificationReservation.PendingSend(pendingUntilMs)
+        }
+
+        prefs.edit()
+            .putLong("${base}_pending_send_until_ms", nowMs + NOTIFICATION_PENDING_LEASE_MS)
+            .commit()
         NotificationReservation.Reserved
     }
 
@@ -119,9 +106,17 @@ class AppPreferences(context: Context) {
     ) = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
         prefs.edit()
-            .putBoolean("${base}_already_notified", true)
+            .putLong("${base}_last_dispatch_ms", timestampMs)
             .putInt("${base}_last_notified_battery", batteryPercent)
             .putLong("${base}_last_notified_at_ms", timestampMs)
+            .remove("${base}_pending_send_until_ms")
+            .commit()
+    }
+
+    fun clearPendingNotificationReservation(deviceIdentity: String) = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        prefs.edit()
+            .remove("${base}_pending_send_until_ms")
             .commit()
     }
 
@@ -140,12 +135,12 @@ class AppPreferences(context: Context) {
         private const val KEY_TOPIC = "settings_topic"
         private const val KEY_AUTHORIZATION = "settings_authorization"
         private const val KEY_LOW_THRESHOLD = "settings_low_threshold"
-        private const val KEY_RESET_THRESHOLD = "settings_reset_threshold"
         private const val KEY_COOLDOWN_HOURS = "settings_cooldown_hours"
         private const val KEY_MONITORING_ENABLED = "settings_monitoring_enabled"
         private const val KEY_LAST_BATTERY_EVENT = "status_last_battery_event"
         private const val KEY_LAST_SEND_RESULT = "status_last_send_result"
         private const val KEY_RECENT_LOGS = "status_recent_logs"
+        private const val NOTIFICATION_PENDING_LEASE_MS = 2 * 60 * 1000L
 
         private val LOCK = Any()
     }

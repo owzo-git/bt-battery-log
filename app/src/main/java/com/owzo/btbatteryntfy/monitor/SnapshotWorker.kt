@@ -19,6 +19,7 @@ class SnapshotWorker(
         val appPreferences = AppPreferences(applicationContext)
         val settings = appPreferences.loadSettings()
         if (!settings.monitoringEnabled) {
+            appPreferences.appendLog("Bluetooth snapshot worker exited because monitoring is disabled.")
             return Result.success()
         }
 
@@ -40,10 +41,28 @@ class SnapshotWorker(
         }
 
         val reason = inputData.getString(AppConstants.WORK_REASON).orEmpty().ifBlank { "snapshot" }
+        val requestedAddress = inputData.getString(AppConstants.WORK_DEVICE_ADDRESS).orEmpty()
         val devices = collectCandidateDevices(adapter)
+        appPreferences.appendLog(
+            "Bluetooth snapshot started. reason=$reason requestedAddress=${requestedAddress.ifBlank { "<all>" }} candidates=${devices.size} bonded=${adapter.bondedDevices.size}.",
+        )
         var processedCount = 0
         for (device in devices.values) {
-            val batteryLevel = BluetoothBatteryProbe.readBatteryLevel(device) ?: continue
+            val label = BatteryMonitorEngine.displayName(
+                BatteryMonitorEngine.safeDeviceName(device),
+                device.address,
+            )
+            val batteryLevel = BluetoothBatteryProbe.readBatteryLevel(device)
+            if (batteryLevel == null) {
+                appPreferences.appendLog(
+                    "Bluetooth snapshot probe found no readable battery for $label (${device.address}).",
+                )
+                continue
+            }
+
+            appPreferences.appendLog(
+                "Bluetooth snapshot probe read battery=$batteryLevel for $label (${device.address}).",
+            )
             processedCount += 1
             BatteryMonitorEngine.processSample(
                 context = applicationContext,
@@ -75,6 +94,7 @@ class SnapshotWorker(
         val requestedAddress = inputData.getString(AppConstants.WORK_DEVICE_ADDRESS).orEmpty()
         if (requestedAddress.isNotBlank() && BluetoothAdapter.checkBluetoothAddress(requestedAddress)) {
             devices[requestedAddress] = adapter.getRemoteDevice(requestedAddress)
+            return devices
         }
 
         for (device in adapter.bondedDevices) {
@@ -83,4 +103,3 @@ class SnapshotWorker(
         return devices
     }
 }
-

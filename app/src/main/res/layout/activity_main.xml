@@ -113,20 +113,6 @@
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/resetThresholdInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/reset_threshold_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/resetThresholdInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/cooldownHoursInputLayout"
             style="@style/Widget.BtBatteryNtfy.TextInputLayout"
             android:layout_width="match_parent"
@@ -186,4 +172,3 @@
     </LinearLayout>
 
 </androidx.core.widget.NestedScrollView>
-

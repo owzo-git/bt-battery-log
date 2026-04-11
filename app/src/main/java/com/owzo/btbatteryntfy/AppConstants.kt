@@ -30,4 +30,3 @@ object AppConstants {
 
     const val MAX_LOG_LINES = 80
 }
-

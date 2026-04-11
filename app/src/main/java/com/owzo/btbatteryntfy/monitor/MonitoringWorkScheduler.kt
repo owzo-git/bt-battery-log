@@ -49,4 +49,3 @@ object MonitoringWorkScheduler {
         WorkManager.getInstance(context.applicationContext).enqueue(request)
     }
 }
-
