@@ -20,6 +20,7 @@ object AppConstants {
     const val EXTRA_DEVICE_NAME = "extra_device_name"
     const val EXTRA_DEVICE_ADDRESS = "extra_device_address"
     const val EXTRA_BATTERY_PERCENT = "extra_battery_percent"
+    const val EXTRA_REMOVE_NOTIFICATION_ON_STOP = "extra_remove_notification_on_stop"
 
     const val ACTION_BATTERY_LEVEL_CHANGED =
         "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"

@@ -242,11 +242,18 @@ class AppPreferences(context: Context) {
         connected: Boolean,
     ) = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
+        val wasActive = prefs.getBoolean("${base}_${AudioProfileKey.A2DP.storageKey}", false) ||
+            prefs.getBoolean("${base}_${AudioProfileKey.HEADSET.storageKey}", false)
         val editor = prefs.edit()
             .putString("${base}_device_name", deviceName?.trim().orEmpty())
             .putString("${base}_device_address", deviceAddress?.trim().orEmpty())
             .putBoolean("${base}_known_audio_device", true)
             .putBoolean("${base}_${profileKey.storageKey}", connected)
+
+        if (connected && !wasActive) {
+            editor.remove("${base}_last_seen_battery")
+            editor.remove("${base}_last_seen_at_ms")
+        }
 
         if (connected) {
             editor.putBoolean("${base}_disconnect_check_pending", false)
@@ -310,11 +317,22 @@ class AppPreferences(context: Context) {
     }
 
     fun shouldSkipDisconnectSummary(deviceIdentity: String, summarySignature: String): Boolean = synchronized(LOCK) {
+        return disconnectSummarySuppressionReason(deviceIdentity, summarySignature) != null
+    }
+
+    fun disconnectSummarySuppressionReason(
+        deviceIdentity: String,
+        summarySignature: String,
+    ): String? = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
         val lastShownSignature = prefs.getString("${base}_last_disconnect_signature", "").orEmpty()
         val dismissedSignature = prefs.getString(KEY_DISMISSED_DISCONNECT_SIGNATURE, "").orEmpty()
 
-        summarySignature == lastShownSignature || summarySignature == dismissedSignature
+        return when (summarySignature) {
+            lastShownSignature -> "already_shown_for_signature"
+            dismissedSignature -> "already_dismissed_for_signature"
+            else -> null
+        }
     }
 
     fun markDisconnectSummaryShown(

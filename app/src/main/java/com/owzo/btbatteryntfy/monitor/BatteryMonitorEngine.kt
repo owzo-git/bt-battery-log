@@ -155,6 +155,7 @@ object BatteryMonitorEngine {
             appPreferences.appendDebugLog("$deviceLabel reconnected before disconnect check finished.")
             return
         }
+        appPreferences.appendDebugLog("$deviceLabel disconnect confirmed after delay ($reason).")
 
         appPreferences.clearConnectedNotificationState()
 
@@ -164,7 +165,13 @@ object BatteryMonitorEngine {
             appPreferences.appendDebugLog(
                 "$deviceLabel disconnected, but no battery value was seen during the session.",
             )
-            BatteryNotificationController.stopConnectedNotificationService(context)
+            val serviceStopRequested = BatteryNotificationController.stopConnectedNotificationService(
+                context = context,
+                removeNotification = true,
+            )
+            appPreferences.appendDebugLog(
+                "Foreground service stop requested for disconnect without summary: $serviceStopRequested.",
+            )
             return
         }
 
@@ -175,8 +182,22 @@ object BatteryMonitorEngine {
         val summaryText = "$deviceLabel disconnected at $batteryPercent% — $disconnectClock"
         val summarySignature = "$deviceIdentity|$batteryPercent|$seenAtMs"
 
-        if (appPreferences.shouldSkipDisconnectSummary(deviceIdentity, summarySignature)) {
-            appPreferences.appendDebugLog("Duplicate disconnect summary suppressed for $deviceLabel.")
+        val suppressionReason = appPreferences.disconnectSummarySuppressionReason(
+            deviceIdentity = deviceIdentity,
+            summarySignature = summarySignature,
+        )
+        val stopRequested = BatteryNotificationController.stopConnectedNotificationService(
+            context = context,
+            removeNotification = suppressionReason != null,
+        )
+        appPreferences.appendDebugLog(
+            "Foreground service stop requested for disconnect: $stopRequested.",
+        )
+
+        if (suppressionReason != null) {
+            appPreferences.appendDebugLog(
+                "Disconnect summary suppressed for $deviceLabel: $suppressionReason.",
+            )
             return
         }
 
@@ -198,7 +219,7 @@ object BatteryMonitorEngine {
             eventType = ActivityEventType.DISCONNECTED,
             eventAtMs = disconnectedAtMs,
         )
-        appPreferences.appendDebugLog("Disconnect summary notification shown: $summaryText ($reason).")
+        appPreferences.appendDebugLog("Disconnect summary notification posted: $summaryText ($reason).")
     }
 
     fun processDisconnectSummaryDismissed(context: Context, summarySignature: String) {

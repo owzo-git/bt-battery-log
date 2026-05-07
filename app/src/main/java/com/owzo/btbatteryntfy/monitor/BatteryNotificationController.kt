@@ -46,7 +46,6 @@ object BatteryNotificationController {
         summarySignature: String,
     ) {
         ensureChannel(context)
-        stopConnectedNotificationService(context)
 
         val deleteIntent = Intent(context, SystemEventReceiver::class.java)
             .setAction(AppConstants.ACTION_NOTIFICATION_DISMISSED)
@@ -76,16 +75,21 @@ object BatteryNotificationController {
     }
 
     fun cancelMainNotification(context: Context) {
-        stopConnectedNotificationService(context)
+        stopConnectedNotificationService(context, removeNotification = true)
         NotificationManagerCompat.from(context).cancel(AppConstants.MAIN_NOTIFICATION_ID)
     }
 
-    fun stopConnectedNotificationService(context: Context) {
+    fun stopConnectedNotificationService(
+        context: Context,
+        removeNotification: Boolean,
+    ): Boolean {
         val stopIntent = Intent(context, ConnectedBatteryNotificationService::class.java)
             .setAction(AppConstants.ACTION_NOTIFICATION_SERVICE_STOP)
-        runCatching {
+            .putExtra(AppConstants.EXTRA_REMOVE_NOTIFICATION_ON_STOP, removeNotification)
+        return runCatching {
             context.startService(stopIntent)
-        }
+            true
+        }.getOrElse { false }
     }
 
     fun buildConnectedNotification(context: Context, contentText: String): Notification {
