@@ -9,6 +9,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.Locale
 
 enum class AudioProfileKey {
     A2DP,
@@ -53,12 +54,14 @@ class AppPreferences(context: Context) {
     fun getStatusSnapshot(
         defaultBatteryEvent: String,
         defaultDisconnectSummary: String,
-        defaultLogText: String,
+        defaultActivityFeedText: String,
+        defaultDebugLogText: String,
     ): StatusSnapshot = synchronized(LOCK) {
         StatusSnapshot(
             lastBatteryEvent = prefs.getString(KEY_LAST_BATTERY_EVENT, defaultBatteryEvent).orEmpty(),
             lastDisconnectSummary = prefs.getString(KEY_LAST_DISCONNECT_SUMMARY, defaultDisconnectSummary).orEmpty(),
-            logText = prefs.getString(KEY_RECENT_LOGS, defaultLogText).orEmpty(),
+            activityFeedText = prefs.getString(KEY_ACTIVITY_FEED, defaultActivityFeedText).orEmpty(),
+            debugLogText = prefs.getString(KEY_DEBUG_LOGS, defaultDebugLogText).orEmpty(),
         )
     }
 
@@ -70,7 +73,57 @@ class AppPreferences(context: Context) {
         prefs.edit().putString(KEY_LAST_DISCONNECT_SUMMARY, summary).commit()
     }
 
-    fun appendLog(message: String) {
+    fun appendActivityEvent(
+        deviceLabel: String,
+        batteryPercent: Int?,
+        eventType: ActivityEventType,
+        eventAtMs: Long = System.currentTimeMillis(),
+    ) {
+        if (deviceLabel.isBlank()) {
+            return
+        }
+
+        if (batteryPercent !in 0..100) {
+            return
+        }
+
+        synchronized(LOCK) {
+            val normalizedDevice = deviceLabel.trim()
+            val signature = "${normalizedDevice.lowercase(Locale.US)}|$batteryPercent|${eventType.label}"
+            val lastSignature = prefs.getString(KEY_LAST_ACTIVITY_SIGNATURE, "").orEmpty()
+            val lastAtMs = prefs.getLong(KEY_LAST_ACTIVITY_AT_MS, 0L)
+            if (signature == lastSignature && eventAtMs - lastAtMs < ACTIVITY_DEDUPE_WINDOW_MS) {
+                return@synchronized
+            }
+
+            val entry = buildString {
+                append(activityTimeFormatter.format(Instant.ofEpochMilli(eventAtMs)))
+                append(' ')
+                append(normalizedDevice)
+                append(' ')
+                append(batteryPercent)
+                append("% (")
+                append(eventType.label)
+                append(')')
+            }
+
+            val current = prefs.getString(KEY_ACTIVITY_FEED, "").orEmpty()
+            val lines = buildList {
+                add(entry)
+                if (current.isNotBlank()) {
+                    addAll(current.lines().filter { it.isNotBlank() })
+                }
+            }.take(AppConstants.MAX_ACTIVITY_LINES)
+
+            prefs.edit()
+                .putString(KEY_ACTIVITY_FEED, lines.joinToString(separator = "\n"))
+                .putString(KEY_LAST_ACTIVITY_SIGNATURE, signature)
+                .putLong(KEY_LAST_ACTIVITY_AT_MS, eventAtMs)
+                .commit()
+        }
+    }
+
+    fun appendDebugLog(message: String) {
         synchronized(LOCK) {
             val sanitized = message.replace('\n', ' ').trim()
             if (sanitized.isBlank()) {
@@ -78,14 +131,14 @@ class AppPreferences(context: Context) {
             }
 
             val nowMs = System.currentTimeMillis()
-            val lastMessage = prefs.getString(KEY_LAST_LOG_MESSAGE, "").orEmpty()
-            val lastAtMs = prefs.getLong(KEY_LAST_LOG_MESSAGE_AT_MS, 0L)
-            if (sanitized == lastMessage && nowMs - lastAtMs < LOG_DEDUPE_WINDOW_MS) {
+            val lastMessage = prefs.getString(KEY_LAST_DEBUG_LOG_MESSAGE, "").orEmpty()
+            val lastAtMs = prefs.getLong(KEY_LAST_DEBUG_LOG_MESSAGE_AT_MS, 0L)
+            if (sanitized == lastMessage && nowMs - lastAtMs < DEBUG_DEDUPE_WINDOW_MS) {
                 return@synchronized
             }
 
-            val entry = "${logTimeFormatter.format(Instant.ofEpochMilli(nowMs))}  $sanitized"
-            val current = prefs.getString(KEY_RECENT_LOGS, "").orEmpty()
+            val entry = "${debugLogTimeFormatter.format(Instant.ofEpochMilli(nowMs))}  $sanitized"
+            val current = prefs.getString(KEY_DEBUG_LOGS, "").orEmpty()
             val lines = buildList {
                 add(entry)
                 if (current.isNotBlank()) {
@@ -94,18 +147,25 @@ class AppPreferences(context: Context) {
             }.take(AppConstants.MAX_LOG_LINES)
 
             prefs.edit()
-                .putString(KEY_RECENT_LOGS, lines.joinToString(separator = "\n"))
-                .putString(KEY_LAST_LOG_MESSAGE, sanitized)
-                .putLong(KEY_LAST_LOG_MESSAGE_AT_MS, nowMs)
+                .putString(KEY_DEBUG_LOGS, lines.joinToString(separator = "\n"))
+                .putString(KEY_LAST_DEBUG_LOG_MESSAGE, sanitized)
+                .putLong(KEY_LAST_DEBUG_LOG_MESSAGE_AT_MS, nowMs)
                 .commit()
         }
     }
 
+    fun appendLog(message: String) {
+        appendDebugLog(message)
+    }
+
     fun clearLogs() = synchronized(LOCK) {
         prefs.edit()
-            .putString(KEY_RECENT_LOGS, "")
-            .remove(KEY_LAST_LOG_MESSAGE)
-            .remove(KEY_LAST_LOG_MESSAGE_AT_MS)
+            .putString(KEY_ACTIVITY_FEED, "")
+            .putString(KEY_DEBUG_LOGS, "")
+            .remove(KEY_LAST_ACTIVITY_SIGNATURE)
+            .remove(KEY_LAST_ACTIVITY_AT_MS)
+            .remove(KEY_LAST_DEBUG_LOG_MESSAGE)
+            .remove(KEY_LAST_DEBUG_LOG_MESSAGE_AT_MS)
             .commit()
     }
 
@@ -123,6 +183,55 @@ class AppPreferences(context: Context) {
             .putInt("${base}_last_seen_battery", batteryPercent)
             .putLong("${base}_last_seen_at_ms", observedAtMs)
             .commit()
+    }
+
+    fun setConnectedNotificationState(
+        deviceIdentity: String,
+        deviceName: String?,
+        deviceAddress: String?,
+        batteryPercent: Int,
+        contentText: String,
+    ) = synchronized(LOCK) {
+        prefs.edit()
+            .putString(KEY_CONNECTED_DEVICE_IDENTITY, deviceIdentity)
+            .putString(KEY_CONNECTED_DEVICE_NAME, deviceName?.trim().orEmpty())
+            .putString(KEY_CONNECTED_DEVICE_ADDRESS, deviceAddress?.trim().orEmpty())
+            .putInt(KEY_CONNECTED_DEVICE_BATTERY, batteryPercent)
+            .putString(KEY_CONNECTED_DEVICE_TEXT, contentText)
+            .putBoolean(KEY_CONNECTED_NOTIFICATION_ACTIVE, true)
+            .commit()
+    }
+
+    fun clearConnectedNotificationState() = synchronized(LOCK) {
+        prefs.edit()
+            .remove(KEY_CONNECTED_DEVICE_IDENTITY)
+            .remove(KEY_CONNECTED_DEVICE_NAME)
+            .remove(KEY_CONNECTED_DEVICE_ADDRESS)
+            .remove(KEY_CONNECTED_DEVICE_BATTERY)
+            .remove(KEY_CONNECTED_DEVICE_TEXT)
+            .putBoolean(KEY_CONNECTED_NOTIFICATION_ACTIVE, false)
+            .commit()
+    }
+
+    fun getConnectedNotificationState(): ConnectedNotificationState? = synchronized(LOCK) {
+        if (!prefs.getBoolean(KEY_CONNECTED_NOTIFICATION_ACTIVE, false)) {
+            return@synchronized null
+        }
+
+        val identity = prefs.getString(KEY_CONNECTED_DEVICE_IDENTITY, "").orEmpty()
+        val batteryPercent = prefs.getInt(KEY_CONNECTED_DEVICE_BATTERY, -1)
+        val contentText = prefs.getString(KEY_CONNECTED_DEVICE_TEXT, "").orEmpty()
+        if (identity.isBlank() || batteryPercent !in 0..100 || contentText.isBlank()) {
+            return@synchronized null
+        }
+
+        ConnectedNotificationState(
+            deviceIdentity = identity,
+            deviceName = prefs.getString(KEY_CONNECTED_DEVICE_NAME, "").orEmpty().ifBlank { null },
+            deviceAddress = prefs.getString(KEY_CONNECTED_DEVICE_ADDRESS, "").orEmpty().ifBlank { null },
+            batteryPercent = batteryPercent,
+            contentText = contentText,
+        )
     }
 
     fun markAudioProfileConnection(
@@ -244,16 +353,30 @@ class AppPreferences(context: Context) {
 
         private const val KEY_LAST_BATTERY_EVENT = "status_last_battery_event"
         private const val KEY_LAST_DISCONNECT_SUMMARY = "status_last_disconnect_summary"
-        private const val KEY_RECENT_LOGS = "status_recent_logs"
+        private const val KEY_ACTIVITY_FEED = "status_activity_feed"
+        private const val KEY_DEBUG_LOGS = "status_debug_logs"
 
-        private const val KEY_LAST_LOG_MESSAGE = "status_last_log_message"
-        private const val KEY_LAST_LOG_MESSAGE_AT_MS = "status_last_log_message_at_ms"
-        private const val LOG_DEDUPE_WINDOW_MS = 8_000L
+        private const val KEY_LAST_ACTIVITY_SIGNATURE = "status_last_activity_signature"
+        private const val KEY_LAST_ACTIVITY_AT_MS = "status_last_activity_at_ms"
+        private const val KEY_LAST_DEBUG_LOG_MESSAGE = "status_last_debug_log_message"
+        private const val KEY_LAST_DEBUG_LOG_MESSAGE_AT_MS = "status_last_debug_log_message_at_ms"
 
         private const val KEY_DISMISSED_DISCONNECT_SIGNATURE = "status_dismissed_disconnect_signature"
 
-        private val logTimeFormatter: DateTimeFormatter =
+        private const val KEY_CONNECTED_NOTIFICATION_ACTIVE = "connected_notification_active"
+        private const val KEY_CONNECTED_DEVICE_IDENTITY = "connected_notification_device_identity"
+        private const val KEY_CONNECTED_DEVICE_NAME = "connected_notification_device_name"
+        private const val KEY_CONNECTED_DEVICE_ADDRESS = "connected_notification_device_address"
+        private const val KEY_CONNECTED_DEVICE_BATTERY = "connected_notification_device_battery"
+        private const val KEY_CONNECTED_DEVICE_TEXT = "connected_notification_content_text"
+
+        private const val ACTIVITY_DEDUPE_WINDOW_MS = 15_000L
+        private const val DEBUG_DEDUPE_WINDOW_MS = 8_000L
+
+        private val debugLogTimeFormatter: DateTimeFormatter =
             DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault())
+        private val activityTimeFormatter: DateTimeFormatter =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault())
 
         private val LOCK = Any()
     }

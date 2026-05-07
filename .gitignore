@@ -4,4 +4,4 @@ build/
 .idea/
 captures/
 *.iml
-
+local.properties

@@ -4,6 +4,7 @@ import android.Manifest
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
@@ -21,6 +22,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appPreferences: AppPreferences
     private val autoSaveHandler = Handler(Looper.getMainLooper())
     private var suppressAutoSave = false
+    private var debugVisible = false
+
     private val autoSaveRunnable = Runnable {
         persistSettings(monitoringEnabled = binding.monitoringSwitch.isChecked)
     }
@@ -34,12 +37,12 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
                 persistSettings(monitoringEnabled = true)
-                appPreferences.appendLog("Bluetooth permission granted. Monitoring enabled.")
+                appPreferences.appendDebugLog("Bluetooth permission granted. Monitoring enabled.")
                 MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "permission_granted")
             } else {
                 binding.monitoringSwitch.isChecked = false
                 persistSettings(monitoringEnabled = false)
-                appPreferences.appendLog("Bluetooth permission denied. Monitoring remains disabled.")
+                appPreferences.appendDebugLog("Bluetooth permission denied. Monitoring remains disabled.")
                 showSnackbar("Bluetooth permission is required for monitoring.")
             }
         }
@@ -52,15 +55,21 @@ class MainActivity : AppCompatActivity() {
         appPreferences = AppPreferences(applicationContext)
         appPreferences.rawPreferences().registerOnSharedPreferenceChangeListener(preferenceChangeListener)
 
+        debugVisible = savedInstanceState?.getBoolean(KEY_DEBUG_VISIBLE, false) ?: false
         populateForm(appPreferences.loadSettings())
-        refreshStatusOnly()
         bindActions()
+        refreshStatusOnly()
     }
 
     override fun onDestroy() {
         autoSaveHandler.removeCallbacks(autoSaveRunnable)
         appPreferences.rawPreferences().unregisterOnSharedPreferenceChangeListener(preferenceChangeListener)
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(KEY_DEBUG_VISIBLE, debugVisible)
+        super.onSaveInstanceState(outState)
     }
 
     private fun bindActions() {
@@ -76,25 +85,31 @@ class MainActivity : AppCompatActivity() {
 
             persistSettings(monitoringEnabled = isChecked)
             if (isChecked) {
-                appPreferences.appendLog("Monitoring enabled.")
+                appPreferences.appendDebugLog("Monitoring enabled.")
                 MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "monitoring_enabled")
             } else {
-                appPreferences.appendLog("Monitoring disabled.")
+                appPreferences.appendDebugLog("Monitoring disabled.")
                 BatteryNotificationController.cancelMainNotification(applicationContext)
+                appPreferences.clearConnectedNotificationState()
             }
         }
 
         setupAutosaveTextField(binding.disconnectDelayInput)
 
-        binding.saveButton.setOnClickListener {
+        binding.refreshNowButton.setOnClickListener {
             if (!binding.monitoringSwitch.isChecked) {
                 showSnackbar("Enable monitoring first.")
                 return@setOnClickListener
             }
 
-            appPreferences.appendLog("Manual refresh requested.")
+            appPreferences.appendDebugLog("Manual refresh requested.")
             MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "manual_refresh")
             showSnackbar("Refresh scheduled.")
+        }
+
+        binding.toggleDebugButton.setOnClickListener {
+            debugVisible = !debugVisible
+            applyDebugVisibility()
         }
 
         binding.clearLogsButton.setOnClickListener {
@@ -114,7 +129,8 @@ class MainActivity : AppCompatActivity() {
         val status = appPreferences.getStatusSnapshot(
             defaultBatteryEvent = getString(R.string.no_recent_battery_event),
             defaultDisconnectSummary = getString(R.string.no_recent_disconnect_summary),
-            defaultLogText = getString(R.string.no_debug_logs),
+            defaultActivityFeedText = getString(R.string.no_activity_events),
+            defaultDebugLogText = getString(R.string.no_debug_logs),
         )
 
         val settings = appPreferences.loadSettings()
@@ -138,9 +154,16 @@ class MainActivity : AppCompatActivity() {
             append(permissionSummary)
             append(notificationsSummary)
         }
-        binding.lastBatteryEventText.text = status.lastBatteryEvent
-        binding.lastDisconnectSummaryText.text = status.lastDisconnectSummary
-        binding.logText.text = status.logText.ifBlank { getString(R.string.no_debug_logs) }
+
+        binding.activityFeedText.text = status.activityFeedText.ifBlank { getString(R.string.no_activity_events) }
+        binding.debugLogText.text = status.debugLogText.ifBlank { getString(R.string.no_debug_logs) }
+        applyDebugVisibility()
+    }
+
+    private fun applyDebugVisibility() {
+        binding.debugSection.visibility = if (debugVisible) View.VISIBLE else View.GONE
+        binding.toggleDebugButton.text =
+            getString(if (debugVisible) R.string.hide_debug_log else R.string.show_debug_log)
     }
 
     private fun persistSettings(monitoringEnabled: Boolean) {
@@ -189,5 +212,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private const val AUTO_SAVE_DELAY_MS = 500L
+        private const val KEY_DEBUG_VISIBLE = "debug_visible"
     }
 }

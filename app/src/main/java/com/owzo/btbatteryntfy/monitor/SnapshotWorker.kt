@@ -23,19 +23,19 @@ class SnapshotWorker(
         }
 
         if (!BatteryMonitorEngine.hasBluetoothConnectPermission(applicationContext)) {
-            appPreferences.appendLog("Bluetooth permission missing. Cannot check device battery.")
+            appPreferences.appendDebugLog("Bluetooth permission missing. Cannot check device battery.")
             return Result.success()
         }
 
         val bluetoothManager = applicationContext.getSystemService(BluetoothManager::class.java)
         val adapter = bluetoothManager?.adapter
         if (adapter == null) {
-            appPreferences.appendLog("No Bluetooth adapter on this device.")
+            appPreferences.appendDebugLog("No Bluetooth adapter on this device.")
             return Result.success()
         }
 
         if (!adapter.isEnabled) {
-            appPreferences.appendLog("Bluetooth is off.")
+            appPreferences.appendDebugLog("Bluetooth is off.")
             return Result.success()
         }
 
@@ -44,7 +44,7 @@ class SnapshotWorker(
         val manualRefresh = reason == "manual_refresh"
         val devices = collectCandidateDevices(adapter)
         if (requestedAddress.isBlank() && manualRefresh) {
-            appPreferences.appendLog("Manual refresh: checking connected headsets.")
+            appPreferences.appendDebugLog("Manual refresh: checking connected headsets.")
         }
 
         var processedCount = 0
@@ -88,12 +88,12 @@ class SnapshotWorker(
         if (processedCount == 0) {
             if (requestedAddress.isNotBlank()) {
                 val label = requestedDeviceLabel ?: requestedAddress
-                appPreferences.appendLog("No battery data from $label.")
+                appPreferences.appendDebugLog("No battery data from $label.")
             } else if (manualRefresh) {
-                appPreferences.appendLog("No connected headsets exposed a readable battery level.")
+                appPreferences.appendDebugLog("No connected headsets exposed a readable battery level.")
             }
         } else if (requestedAddress.isBlank() && manualRefresh) {
-            appPreferences.appendLog(
+            appPreferences.appendDebugLog(
                 "Manual refresh found battery data for $processedCount connected headset(s).",
             )
         }

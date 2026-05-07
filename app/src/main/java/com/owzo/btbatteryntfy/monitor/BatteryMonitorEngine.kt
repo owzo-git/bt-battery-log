@@ -7,6 +7,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import com.owzo.btbatteryntfy.data.ActivityEventType
 import com.owzo.btbatteryntfy.data.AppPreferences
 import java.time.Instant
 import java.time.LocalDateTime
@@ -84,20 +85,49 @@ object BatteryMonitorEngine {
         appPreferences.clearDismissedSummaryMarker()
 
         val connectedText = "$deviceLabel — ${sample.batteryPercent}%"
-        BatteryNotificationController.showConnected(context, connectedText)
+        appPreferences.setConnectedNotificationState(
+            deviceIdentity = identity,
+            deviceName = sample.deviceName,
+            deviceAddress = sample.deviceAddress,
+            batteryPercent = sample.batteryPercent,
+            contentText = connectedText,
+        )
+        BatteryNotificationController.showConnected(
+            context = context,
+            contentText = connectedText,
+            deviceIdentity = identity,
+            deviceName = sample.deviceName,
+            deviceAddress = sample.deviceAddress,
+            batteryPercent = sample.batteryPercent,
+        )
+
         appPreferences.updateLastBatteryEvent(
             "Last battery seen: $deviceLabel ${sample.batteryPercent}% @ $timestamp",
         )
 
         when {
-            previousBattery == null ->
-                appPreferences.appendLog("$deviceLabel battery received: ${sample.batteryPercent}%.")
+            previousBattery == null -> {
+                appPreferences.appendActivityEvent(
+                    deviceLabel = deviceLabel,
+                    batteryPercent = sample.batteryPercent,
+                    eventType = ActivityEventType.CONNECTED,
+                    eventAtMs = sample.observedAtMs,
+                )
+                appPreferences.appendDebugLog("$deviceLabel battery received: ${sample.batteryPercent}%.")
+            }
 
-            previousBattery != sample.batteryPercent ->
-                appPreferences.appendLog("$deviceLabel battery changed: $previousBattery% — ${sample.batteryPercent}%.")
+            previousBattery != sample.batteryPercent -> {
+                appPreferences.appendActivityEvent(
+                    deviceLabel = deviceLabel,
+                    batteryPercent = sample.batteryPercent,
+                    eventType = ActivityEventType.UPDATED,
+                    eventAtMs = sample.observedAtMs,
+                )
+                appPreferences.appendDebugLog(
+                    "$deviceLabel battery changed: $previousBattery% — ${sample.batteryPercent}%.",
+                )
+            }
         }
-
-        appPreferences.appendLog("Connected notification shown/updated: $connectedText.")
     }
 
     fun processConfirmedDisconnect(
@@ -122,14 +152,19 @@ object BatteryMonitorEngine {
         )
 
         if (state.isAudioSessionActive) {
-            appPreferences.appendLog("$deviceLabel reconnected before disconnect check finished.")
+            appPreferences.appendDebugLog("$deviceLabel reconnected before disconnect check finished.")
             return
         }
+
+        appPreferences.clearConnectedNotificationState()
 
         val batteryPercent = state.lastSeenBattery
         val seenAtMs = state.lastSeenAtMs
         if (batteryPercent !in 0..100 || seenAtMs <= 0L) {
-            appPreferences.appendLog("$deviceLabel disconnected, but no battery value was seen during the session.")
+            appPreferences.appendDebugLog(
+                "$deviceLabel disconnected, but no battery value was seen during the session.",
+            )
+            BatteryNotificationController.stopConnectedNotificationService(context)
             return
         }
 
@@ -141,7 +176,7 @@ object BatteryMonitorEngine {
         val summarySignature = "$deviceIdentity|$batteryPercent|$seenAtMs"
 
         if (appPreferences.shouldSkipDisconnectSummary(deviceIdentity, summarySignature)) {
-            appPreferences.appendLog("Duplicate disconnect summary suppressed for $deviceLabel.")
+            appPreferences.appendDebugLog("Duplicate disconnect summary suppressed for $deviceLabel.")
             return
         }
 
@@ -157,7 +192,13 @@ object BatteryMonitorEngine {
             disconnectedAtMs = disconnectedAtMs,
         )
         appPreferences.updateLastDisconnectSummary("Last disconnect summary: $summaryText")
-        appPreferences.appendLog("Disconnect summary notification shown: $summaryText ($reason).")
+        appPreferences.appendActivityEvent(
+            deviceLabel = deviceLabel,
+            batteryPercent = batteryPercent,
+            eventType = ActivityEventType.DISCONNECTED,
+            eventAtMs = disconnectedAtMs,
+        )
+        appPreferences.appendDebugLog("Disconnect summary notification shown: $summaryText ($reason).")
     }
 
     fun processDisconnectSummaryDismissed(context: Context, summarySignature: String) {
@@ -167,7 +208,41 @@ object BatteryMonitorEngine {
 
         val appPreferences = AppPreferences(context)
         appPreferences.markDisconnectSummaryDismissed(summarySignature)
-        appPreferences.appendLog("Disconnect summary notification dismissed.")
+        appPreferences.appendDebugLog("Disconnect summary notification dismissed.")
+
+        val parts = summarySignature.split('|')
+        val deviceIdentity = parts.getOrNull(0).orEmpty()
+        val batteryPercent = parts.getOrNull(1)?.toIntOrNull()
+        if (deviceIdentity.isBlank() || batteryPercent !in 0..100) {
+            return
+        }
+
+        val state = appPreferences.getTrackedDeviceState(deviceIdentity)
+        val deviceLabel = displayName(state.deviceName, state.deviceAddress)
+        appPreferences.appendActivityEvent(
+            deviceLabel = deviceLabel,
+            batteryPercent = batteryPercent,
+            eventType = ActivityEventType.NOTIFICATION_DISMISSED,
+        )
+    }
+
+    fun processConnectedNotificationDismissed(context: Context) {
+        val appPreferences = AppPreferences(context)
+        val settings = appPreferences.loadSettings()
+        if (!settings.monitoringEnabled) {
+            return
+        }
+
+        val state = appPreferences.getConnectedNotificationState() ?: return
+        BatteryNotificationController.showConnected(
+            context = context,
+            contentText = state.contentText,
+            deviceIdentity = state.deviceIdentity,
+            deviceName = state.deviceName,
+            deviceAddress = state.deviceAddress,
+            batteryPercent = state.batteryPercent,
+        )
+        appPreferences.appendDebugLog("Connected notification was dismissed and restored while headset remained connected.")
     }
 
     fun displayName(deviceName: String?, deviceAddress: String?): String {

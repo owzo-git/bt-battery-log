@@ -21,12 +21,19 @@ class SystemEventReceiver : BroadcastReceiver() {
         val appContext = context.applicationContext
         val appPreferences = AppPreferences(appContext)
 
-        if (action == AppConstants.ACTION_NOTIFICATION_DISMISSED) {
-            BatteryMonitorEngine.processDisconnectSummaryDismissed(
-                context = appContext,
-                summarySignature = intent.getStringExtra(AppConstants.EXTRA_NOTIFICATION_SIGNATURE).orEmpty(),
-            )
-            return
+        when (action) {
+            AppConstants.ACTION_NOTIFICATION_DISMISSED -> {
+                BatteryMonitorEngine.processDisconnectSummaryDismissed(
+                    context = appContext,
+                    summarySignature = intent.getStringExtra(AppConstants.EXTRA_NOTIFICATION_SIGNATURE).orEmpty(),
+                )
+                return
+            }
+
+            AppConstants.ACTION_CONNECTED_NOTIFICATION_DISMISSED -> {
+                BatteryMonitorEngine.processConnectedNotificationDismissed(appContext)
+                return
+            }
         }
 
         val settings = appPreferences.loadSettings()
@@ -41,7 +48,7 @@ class SystemEventReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             -> {
                 if (settings.monitoringEnabled) {
-                    appPreferences.appendLog("Phone restarted. Refreshing Bluetooth battery snapshot.")
+                    appPreferences.appendDebugLog("Phone restarted. Refreshing Bluetooth battery snapshot.")
                     MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = action)
                 }
             }
@@ -53,12 +60,12 @@ class SystemEventReceiver : BroadcastReceiver() {
 
                 when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
                     BluetoothAdapter.STATE_ON -> {
-                        appPreferences.appendLog("Bluetooth turned on. Refreshing connected headset battery.")
+                        appPreferences.appendDebugLog("Bluetooth turned on. Refreshing connected headset battery.")
                         MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = "adapter_on")
                     }
 
                     BluetoothAdapter.STATE_OFF -> {
-                        appPreferences.appendLog("Bluetooth turned off.")
+                        appPreferences.appendDebugLog("Bluetooth turned off.")
                     }
                 }
             }
@@ -78,7 +85,7 @@ class SystemEventReceiver : BroadcastReceiver() {
                 appPreferences.clearDismissedSummaryMarker()
                 MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
                 appPreferences.clearDisconnectCheckPending(identity)
-                appPreferences.appendLog("$deviceLabel connected. Refreshing battery snapshot.")
+                appPreferences.appendDebugLog("$deviceLabel connected. Refreshing battery snapshot.")
                 MonitoringWorkScheduler.enqueueSnapshot(
                     context = appContext,
                     reason = "acl_connected",
@@ -214,7 +221,7 @@ class SystemEventReceiver : BroadcastReceiver() {
                 appPreferences.clearDismissedSummaryMarker()
                 MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
                 appPreferences.clearDisconnectCheckPending(identity)
-                appPreferences.appendLog("$deviceLabel connected. Refreshing battery snapshot.")
+                appPreferences.appendDebugLog("$deviceLabel connected. Refreshing battery snapshot.")
                 MonitoringWorkScheduler.enqueueSnapshot(
                     context = appContext,
                     reason = "${source}_connected",
@@ -260,11 +267,11 @@ class SystemEventReceiver : BroadcastReceiver() {
         val nowMs = System.currentTimeMillis()
         val newlyPending = appPreferences.markDisconnectCheckPending(deviceIdentity, nowMs)
         if (!newlyPending) {
-            appPreferences.appendLog("Duplicate disconnect signal suppressed for $deviceLabel.")
+            appPreferences.appendDebugLog("Duplicate disconnect signal suppressed for $deviceLabel.")
             return
         }
 
-        appPreferences.appendLog(
+        appPreferences.appendDebugLog(
             "$deviceLabel disconnected. Waiting ${settings.disconnectDelaySeconds}s before showing summary.",
         )
         MonitoringWorkScheduler.enqueueDisconnectCheck(
