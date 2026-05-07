@@ -4,6 +4,10 @@ BT Battery Log is an Android utility for monitoring Bluetooth headset battery an
 
 No `ntfy`, no server, no internet setup.
 
+## App Icon
+
+<img src="app/src/main/res/drawable-nodpi/ic_launcher_foreground_art.png" alt="BT Battery Log icon" width="160" />
+
 ## Features
 
 - Reads battery updates from Bluetooth broadcasts / headset vendor events when Android exposes them.
