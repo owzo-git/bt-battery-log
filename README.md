@@ -9,6 +9,7 @@ No `ntfy`, no server, no internet setup.
 - Reads battery updates from Bluetooth broadcasts / headset vendor events when Android exposes them.
 - Focuses on headphone-style Bluetooth audio devices.
 - Uses one stable notification ID for battery state.
+- Uses adaptive launcher icon artwork based on a Gemini AI-generated Bluetooth battery image.
 
 ### Connected state
 
