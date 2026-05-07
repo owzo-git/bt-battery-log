@@ -1,44 +1,58 @@
 # BT Battery Log
 
-BT Battery Log is a lightweight Android utility that tracks supported Bluetooth headset battery levels and shows local Android notifications only.
+BT Battery Log is an Android utility for monitoring Bluetooth headset battery and showing **local-only** notifications.
 
-No `ntfy` server, endpoint, topic, or network setup is required.
+No `ntfy`, no server, no internet setup.
 
-## What It Does
+## Features
 
-- Watches Bluetooth battery updates from Android Bluetooth broadcasts and headset vendor events when available.
+- Reads battery updates from Bluetooth broadcasts / headset vendor events when Android exposes them.
 - Focuses on headphone-style Bluetooth audio devices.
-- While a supported headset is connected and reports battery:
-  - Shows one persistent ongoing notification.
-  - Reuses the same notification ID and updates it in place as battery changes.
-- When the headset disconnects and stays disconnected after a short delay:
-  - Converts that same notification into a dismissible disconnect summary.
-  - Keeps the summary until you swipe it away.
-- Deduplicates repeated disconnect signals so duplicate summaries are suppressed.
-- Restores monitoring behavior after reboot if monitoring is enabled.
+- Uses one stable notification ID for battery state.
 
-## App Settings
+### Connected state
 
-- Monitoring enabled/disabled
+- While a supported headset is connected and battery is known:
+  - shows an ongoing battery notification
+  - updates the same notification in place when battery changes
+
+### Disconnected state
+
+- After disconnect (with configured delay), the same notification is converted into a dismissible summary:
+  - `Device disconnected at XX% — HH:mm`
+- Summary stays until user swipes it away.
+- Duplicate disconnect summaries are suppressed.
+
+## Notification persistence behavior
+
+- App uses a foreground service while headset is connected to make connected-state notification behavior as persistent as Android allows.
+- On disconnect summary, service is stopped and summary notification remains normal/dismissible.
+
+## UI
+
+- Monitoring on/off
 - Disconnect delay seconds
 - Refresh now
-- Clear debug logs
+- Clear activity + debug logs
+- Activity feed (compact, user-facing lifecycle events)
+- Expandable detailed debug log (`Show debug log` / `Hide debug log`)
 
-The app also shows recent events for lightweight debugging.
+## Activity feed format
 
-## Android Permissions Used
+Main feed shows normalized rows like:
 
-- `android.permission.RECEIVE_BOOT_COMPLETED`
-  Re-arms monitoring behavior after device reboot.
+`YYYY-MM-DD HH:mm Device Name XX% (connected|updated|disconnected|notification dismissed)`
+
+Internal diagnostic messages are kept in detailed debug log, not in main feed.
+
+## Permissions
 
 - `android.permission.BLUETOOTH_CONNECT`
-  Needed on modern Android versions to read Bluetooth device details and battery-related events.
-
-- `android.permission.BLUETOOTH` and `android.permission.BLUETOOTH_ADMIN` with `maxSdkVersion="30"`
-  Included for compatibility with older Android releases.
-
+- `android.permission.BLUETOOTH` and `android.permission.BLUETOOTH_ADMIN` (`maxSdkVersion="30"`)
 - `android.permission.POST_NOTIFICATIONS`
-  Allows Android notifications on Android 13+.
+- `android.permission.RECEIVE_BOOT_COMPLETED`
+- `android.permission.FOREGROUND_SERVICE`
+- `android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE`
 
 ## Build
 
@@ -52,9 +66,10 @@ The app also shows recent events for lightweight debugging.
 ./gradlew installDebug
 ```
 
-## Known Limitations
+## Known limitations
 
-- Bluetooth battery reporting depends on whether the phone + headset expose battery data to third-party apps.
-- Disconnect detection for third-party apps is best-effort. Most headphones expose usable profile disconnect events, but behavior varies by phone/accessory.
-- Some devices expose battery through system broadcasts, some only through vendor-specific headset events, and some do not expose it at all.
-- Force-stopping the app from system settings can prevent future broadcasts until the app is opened again.
+- Bluetooth battery visibility depends on headset + phone + Android implementation.
+- Some devices do not expose battery to third-party apps at all.
+- Disconnect detection is best-effort and depends on Bluetooth broadcast/profile behavior.
+- On newer Android versions (notably Android 14+), users may still dismiss ongoing notifications in some system flows; app attempts to restore connected notification while connection remains active.
+- If app is force-stopped from system settings, future Bluetooth broadcasts may not be delivered until app is opened again.
