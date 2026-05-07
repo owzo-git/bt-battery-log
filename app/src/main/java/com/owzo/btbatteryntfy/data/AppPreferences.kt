@@ -10,12 +10,6 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-sealed interface NotificationReservation {
-    data object Reserved : NotificationReservation
-    data class CooldownActive(val nextAllowedAtMs: Long) : NotificationReservation
-    data class PendingSend(val leaseExpiresAtMs: Long) : NotificationReservation
-}
-
 enum class AudioProfileKey {
     A2DP,
     HEADSET,
@@ -26,6 +20,7 @@ data class TrackedDeviceState(
     val deviceAddress: String?,
     val lastSeenBattery: Int?,
     val lastSeenAtMs: Long,
+    val lastDisconnectAtMs: Long,
     val a2dpConnected: Boolean,
     val headsetConnected: Boolean,
     val knownAudioDevice: Boolean,
@@ -40,10 +35,6 @@ class AppPreferences(context: Context) {
 
     fun loadSettings(): AppSettings = synchronized(LOCK) {
         AppSettings(
-            serverUrlOrEndpoint = prefs.getString(KEY_SERVER_URL, "").orEmpty(),
-            topic = prefs.getString(KEY_TOPIC, "").orEmpty(),
-            authorizationHeader = prefs.getString(KEY_AUTHORIZATION, "").orEmpty(),
-            cooldownHours = prefs.getInt(KEY_COOLDOWN_HOURS, AppSettings.DEFAULT_COOLDOWN_HOURS),
             disconnectDelaySeconds = prefs.getInt(
                 KEY_DISCONNECT_DELAY_SECONDS,
                 AppSettings.DEFAULT_DISCONNECT_DELAY_SECONDS,
@@ -54,10 +45,6 @@ class AppPreferences(context: Context) {
 
     fun saveSettings(settings: AppSettings) = synchronized(LOCK) {
         prefs.edit()
-            .putString(KEY_SERVER_URL, settings.serverUrlOrEndpoint.trim())
-            .putString(KEY_TOPIC, settings.topic.trim())
-            .putString(KEY_AUTHORIZATION, settings.authorizationHeader.trim())
-            .putInt(KEY_COOLDOWN_HOURS, settings.cooldownHours)
             .putInt(KEY_DISCONNECT_DELAY_SECONDS, settings.disconnectDelaySeconds)
             .putBoolean(KEY_MONITORING_ENABLED, settings.monitoringEnabled)
             .commit()
@@ -65,12 +52,12 @@ class AppPreferences(context: Context) {
 
     fun getStatusSnapshot(
         defaultBatteryEvent: String,
-        defaultSendResult: String,
+        defaultDisconnectSummary: String,
         defaultLogText: String,
     ): StatusSnapshot = synchronized(LOCK) {
         StatusSnapshot(
             lastBatteryEvent = prefs.getString(KEY_LAST_BATTERY_EVENT, defaultBatteryEvent).orEmpty(),
-            lastSendResult = prefs.getString(KEY_LAST_SEND_RESULT, defaultSendResult).orEmpty(),
+            lastDisconnectSummary = prefs.getString(KEY_LAST_DISCONNECT_SUMMARY, defaultDisconnectSummary).orEmpty(),
             logText = prefs.getString(KEY_RECENT_LOGS, defaultLogText).orEmpty(),
         )
     }
@@ -79,34 +66,47 @@ class AppPreferences(context: Context) {
         prefs.edit().putString(KEY_LAST_BATTERY_EVENT, summary).commit()
     }
 
-    fun updateLastSendResult(summary: String) = synchronized(LOCK) {
-        prefs.edit().putString(KEY_LAST_SEND_RESULT, summary).commit()
+    fun updateLastDisconnectSummary(summary: String) = synchronized(LOCK) {
+        prefs.edit().putString(KEY_LAST_DISCONNECT_SUMMARY, summary).commit()
     }
 
     fun appendLog(message: String) {
         synchronized(LOCK) {
-        val sanitized = message.replace('\n', ' ').trim()
-        if (sanitized.isBlank()) {
-            return@synchronized
-        }
-
-        val entry = "${logTimeFormatter.format(Instant.now())}  $sanitized"
-        val current = prefs.getString(KEY_RECENT_LOGS, "").orEmpty()
-        val lines = buildList {
-            add(entry)
-            if (current.isNotBlank()) {
-                addAll(current.lines().filter { it.isNotBlank() })
+            val sanitized = message.replace('\n', ' ').trim()
+            if (sanitized.isBlank()) {
+                return@synchronized
             }
-        }.take(AppConstants.MAX_LOG_LINES)
 
-        prefs.edit()
-            .putString(KEY_RECENT_LOGS, lines.joinToString(separator = "\n"))
-            .commit()
+            val nowMs = System.currentTimeMillis()
+            val lastMessage = prefs.getString(KEY_LAST_LOG_MESSAGE, "").orEmpty()
+            val lastAtMs = prefs.getLong(KEY_LAST_LOG_MESSAGE_AT_MS, 0L)
+            if (sanitized == lastMessage && nowMs - lastAtMs < LOG_DEDUPE_WINDOW_MS) {
+                return@synchronized
+            }
+
+            val entry = "${logTimeFormatter.format(Instant.ofEpochMilli(nowMs))}  $sanitized"
+            val current = prefs.getString(KEY_RECENT_LOGS, "").orEmpty()
+            val lines = buildList {
+                add(entry)
+                if (current.isNotBlank()) {
+                    addAll(current.lines().filter { it.isNotBlank() })
+                }
+            }.take(AppConstants.MAX_LOG_LINES)
+
+            prefs.edit()
+                .putString(KEY_RECENT_LOGS, lines.joinToString(separator = "\n"))
+                .putString(KEY_LAST_LOG_MESSAGE, sanitized)
+                .putLong(KEY_LAST_LOG_MESSAGE_AT_MS, nowMs)
+                .commit()
         }
     }
 
     fun clearLogs() = synchronized(LOCK) {
-        prefs.edit().putString(KEY_RECENT_LOGS, "").commit()
+        prefs.edit()
+            .putString(KEY_RECENT_LOGS, "")
+            .remove(KEY_LAST_LOG_MESSAGE)
+            .remove(KEY_LAST_LOG_MESSAGE_AT_MS)
+            .commit()
     }
 
     fun recordLastSeenBattery(
@@ -133,12 +133,17 @@ class AppPreferences(context: Context) {
         connected: Boolean,
     ) = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
-        prefs.edit()
+        val editor = prefs.edit()
             .putString("${base}_device_name", deviceName?.trim().orEmpty())
             .putString("${base}_device_address", deviceAddress?.trim().orEmpty())
             .putBoolean("${base}_known_audio_device", true)
             .putBoolean("${base}_${profileKey.storageKey}", connected)
-            .commit()
+
+        if (connected) {
+            editor.putBoolean("${base}_disconnect_check_pending", false)
+        }
+
+        editor.commit()
     }
 
     fun markAllAudioProfilesDisconnected(
@@ -167,53 +172,60 @@ class AppPreferences(context: Context) {
                 null
             },
             lastSeenAtMs = prefs.getLong("${base}_last_seen_at_ms", 0L),
+            lastDisconnectAtMs = prefs.getLong("${base}_last_disconnect_at_ms", 0L),
             a2dpConnected = prefs.getBoolean("${base}_${AudioProfileKey.A2DP.storageKey}", false),
             headsetConnected = prefs.getBoolean("${base}_${AudioProfileKey.HEADSET.storageKey}", false),
             knownAudioDevice = prefs.getBoolean("${base}_known_audio_device", false),
         )
     }
 
-    fun reserveNotificationIfAllowed(
-        deviceIdentity: String,
-        cooldownMillis: Long,
-        nowMs: Long,
-    ): NotificationReservation = synchronized(LOCK) {
+    fun markDisconnectCheckPending(deviceIdentity: String, requestedAtMs: Long): Boolean = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
-        val lastDispatchMs = prefs.getLong("${base}_last_dispatch_ms", 0L)
-        if (lastDispatchMs > 0L && nowMs - lastDispatchMs < cooldownMillis) {
-            return NotificationReservation.CooldownActive(lastDispatchMs + cooldownMillis)
-        }
-
-        val pendingUntilMs = prefs.getLong("${base}_pending_send_until_ms", 0L)
-        if (pendingUntilMs > nowMs) {
-            return NotificationReservation.PendingSend(pendingUntilMs)
+        if (prefs.getBoolean("${base}_disconnect_check_pending", false)) {
+            return@synchronized false
         }
 
         prefs.edit()
-            .putLong("${base}_pending_send_until_ms", nowMs + NOTIFICATION_PENDING_LEASE_MS)
+            .putBoolean("${base}_disconnect_check_pending", true)
+            .putLong("${base}_disconnect_check_requested_at_ms", requestedAtMs)
             .commit()
-        NotificationReservation.Reserved
+        true
     }
 
-    fun markNotificationSent(
+    fun clearDisconnectCheckPending(deviceIdentity: String) = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        prefs.edit()
+            .putBoolean("${base}_disconnect_check_pending", false)
+            .remove("${base}_disconnect_check_requested_at_ms")
+            .commit()
+    }
+
+    fun shouldSkipDisconnectSummary(deviceIdentity: String, summarySignature: String): Boolean = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        val lastShownSignature = prefs.getString("${base}_last_disconnect_signature", "").orEmpty()
+        val dismissedSignature = prefs.getString(KEY_DISMISSED_DISCONNECT_SIGNATURE, "").orEmpty()
+
+        summarySignature == lastShownSignature || summarySignature == dismissedSignature
+    }
+
+    fun markDisconnectSummaryShown(
         deviceIdentity: String,
-        batteryPercent: Int,
-        timestampMs: Long,
+        summarySignature: String,
+        disconnectedAtMs: Long,
     ) = synchronized(LOCK) {
         val base = deviceBase(deviceIdentity)
         prefs.edit()
-            .putLong("${base}_last_dispatch_ms", timestampMs)
-            .putInt("${base}_last_notified_battery", batteryPercent)
-            .putLong("${base}_last_notified_at_ms", timestampMs)
-            .remove("${base}_pending_send_until_ms")
+            .putString("${base}_last_disconnect_signature", summarySignature)
+            .putLong("${base}_last_disconnect_at_ms", disconnectedAtMs)
             .commit()
     }
 
-    fun clearPendingNotificationReservation(deviceIdentity: String) = synchronized(LOCK) {
-        val base = deviceBase(deviceIdentity)
-        prefs.edit()
-            .remove("${base}_pending_send_until_ms")
-            .commit()
+    fun markDisconnectSummaryDismissed(summarySignature: String) = synchronized(LOCK) {
+        prefs.edit().putString(KEY_DISMISSED_DISCONNECT_SIGNATURE, summarySignature).commit()
+    }
+
+    fun clearDismissedSummaryMarker() = synchronized(LOCK) {
+        prefs.edit().remove(KEY_DISMISSED_DISCONNECT_SIGNATURE).commit()
     }
 
     fun rawPreferences(): SharedPreferences = prefs
@@ -227,16 +239,19 @@ class AppPreferences(context: Context) {
     }
 
     companion object {
-        private const val KEY_SERVER_URL = "settings_server_url"
-        private const val KEY_TOPIC = "settings_topic"
-        private const val KEY_AUTHORIZATION = "settings_authorization"
-        private const val KEY_COOLDOWN_HOURS = "settings_cooldown_hours"
         private const val KEY_DISCONNECT_DELAY_SECONDS = "settings_disconnect_delay_seconds"
         private const val KEY_MONITORING_ENABLED = "settings_monitoring_enabled"
+
         private const val KEY_LAST_BATTERY_EVENT = "status_last_battery_event"
-        private const val KEY_LAST_SEND_RESULT = "status_last_send_result"
+        private const val KEY_LAST_DISCONNECT_SUMMARY = "status_last_disconnect_summary"
         private const val KEY_RECENT_LOGS = "status_recent_logs"
-        private const val NOTIFICATION_PENDING_LEASE_MS = 2 * 60 * 1000L
+
+        private const val KEY_LAST_LOG_MESSAGE = "status_last_log_message"
+        private const val KEY_LAST_LOG_MESSAGE_AT_MS = "status_last_log_message_at_ms"
+        private const val LOG_DEDUPE_WINDOW_MS = 8_000L
+
+        private const val KEY_DISMISSED_DISCONNECT_SIGNATURE = "status_dismissed_disconnect_signature"
+
         private val logTimeFormatter: DateTimeFormatter =
             DateTimeFormatter.ofLocalizedTime(FormatStyle.MEDIUM).withZone(ZoneId.systemDefault())
 

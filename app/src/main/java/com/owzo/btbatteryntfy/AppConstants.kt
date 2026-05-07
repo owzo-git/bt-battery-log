@@ -2,6 +2,12 @@ package com.owzo.btbatteryntfy
 
 object AppConstants {
     const val PREFS_NAME = "bt_battery_ntfy"
+    const val NOTIFICATION_CHANNEL_ID = "bt_battery_log_channel"
+    const val NOTIFICATION_CHANNEL_NAME = "BT Battery Log"
+    const val MAIN_NOTIFICATION_ID = 1001
+    const val ACTION_NOTIFICATION_DISMISSED =
+        "com.owzo.btbatteryntfy.action.NOTIFICATION_DISMISSED"
+    const val EXTRA_NOTIFICATION_SIGNATURE = "extra_notification_signature"
 
     const val ACTION_BATTERY_LEVEL_CHANGED =
         "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"

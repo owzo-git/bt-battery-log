@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
@@ -20,8 +20,7 @@
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.BtBatteryNtfy"
-        android:usesCleartextTraffic="true">
+        android:theme="@style/Theme.BtBatteryNtfy">
 
         <receiver
             android:name=".monitor.SystemEventReceiver"
@@ -39,6 +38,7 @@
                 <action android:name="android.bluetooth.headset.profile.action.CONNECTION_STATE_CHANGED" />
                 <action android:name="android.bluetooth.headset.action.HF_INDICATORS_VALUE_CHANGED" />
                 <action android:name="android.bluetooth.headset.action.VENDOR_SPECIFIC_HEADSET_EVENT" />
+                <action android:name="com.owzo.btbatteryntfy.action.NOTIFICATION_DISMISSED" />
             </intent-filter>
         </receiver>
 

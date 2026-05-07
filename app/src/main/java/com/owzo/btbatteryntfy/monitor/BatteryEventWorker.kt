@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.owzo.btbatteryntfy.AppConstants
-import com.owzo.btbatteryntfy.data.AppPreferences
 
 class BatteryEventWorker(
     appContext: Context,

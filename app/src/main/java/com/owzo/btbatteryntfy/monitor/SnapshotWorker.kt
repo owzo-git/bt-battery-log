@@ -41,9 +41,10 @@ class SnapshotWorker(
 
         val reason = inputData.getString(AppConstants.WORK_REASON).orEmpty().ifBlank { "snapshot" }
         val requestedAddress = inputData.getString(AppConstants.WORK_DEVICE_ADDRESS).orEmpty()
+        val manualRefresh = reason == "manual_refresh"
         val devices = collectCandidateDevices(adapter)
-        if (requestedAddress.isBlank()) {
-            appPreferences.appendLog("Checking connected headphones.")
+        if (requestedAddress.isBlank() && manualRefresh) {
+            appPreferences.appendLog("Manual refresh: checking connected headsets.")
         }
 
         var processedCount = 0
@@ -88,12 +89,12 @@ class SnapshotWorker(
             if (requestedAddress.isNotBlank()) {
                 val label = requestedDeviceLabel ?: requestedAddress
                 appPreferences.appendLog("No battery data from $label.")
-            } else {
-                appPreferences.appendLog("No connected headphones exposed a readable battery level.")
+            } else if (manualRefresh) {
+                appPreferences.appendLog("No connected headsets exposed a readable battery level.")
             }
-        } else if (requestedAddress.isBlank()) {
+        } else if (requestedAddress.isBlank() && manualRefresh) {
             appPreferences.appendLog(
-                "Found battery data for $processedCount connected headphone(s).",
+                "Manual refresh found battery data for $processedCount connected headset(s).",
             )
         }
 

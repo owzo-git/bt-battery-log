@@ -8,7 +8,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
 import com.owzo.btbatteryntfy.data.AppPreferences
-import com.owzo.btbatteryntfy.data.NotificationReservation
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -32,6 +31,8 @@ object BatteryMonitorEngine {
             .withZone(ZoneId.systemDefault())
     private val notificationTimestampFormatter: DateTimeFormatter =
         DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+    private val disconnectClockFormatter: DateTimeFormatter =
+        DateTimeFormatter.ofPattern("HH:mm")
 
     fun hasBluetoothConnectPermission(context: Context): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
@@ -70,6 +71,8 @@ object BatteryMonitorEngine {
         val deviceLabel = displayName(sample.deviceName, sample.deviceAddress)
         val timestamp = formatNotificationTimestamp(sample.observedAtMs)
         val identity = stableDeviceIdentity(sample.deviceName, sample.deviceAddress)
+        val previousState = appPreferences.getTrackedDeviceState(identity)
+        val previousBattery = previousState.lastSeenBattery
 
         appPreferences.recordLastSeenBattery(
             deviceIdentity = identity,
@@ -78,10 +81,23 @@ object BatteryMonitorEngine {
             batteryPercent = sample.batteryPercent,
             observedAtMs = sample.observedAtMs,
         )
+        appPreferences.clearDismissedSummaryMarker()
+
+        val connectedText = "$deviceLabel — ${sample.batteryPercent}%"
+        BatteryNotificationController.showConnected(context, connectedText)
         appPreferences.updateLastBatteryEvent(
             "Last battery seen: $deviceLabel ${sample.batteryPercent}% @ $timestamp",
         )
-        appPreferences.appendLog("$deviceLabel battery updated: ${sample.batteryPercent}% @ $timestamp.")
+
+        when {
+            previousBattery == null ->
+                appPreferences.appendLog("$deviceLabel battery received: ${sample.batteryPercent}%.")
+
+            previousBattery != sample.batteryPercent ->
+                appPreferences.appendLog("$deviceLabel battery changed: $previousBattery% — ${sample.batteryPercent}%.")
+        }
+
+        appPreferences.appendLog("Connected notification shown/updated: $connectedText.")
     }
 
     fun processConfirmedDisconnect(
@@ -92,6 +108,8 @@ object BatteryMonitorEngine {
         reason: String,
     ) {
         val appPreferences = AppPreferences(context)
+        appPreferences.clearDisconnectCheckPending(deviceIdentity)
+
         val settings = appPreferences.loadSettings()
         if (!settings.monitoringEnabled) {
             return
@@ -114,57 +132,42 @@ object BatteryMonitorEngine {
             appPreferences.appendLog("$deviceLabel disconnected, but no battery value was seen during the session.")
             return
         }
-        val confirmedBatteryPercent = batteryPercent ?: return
 
-        val endpoint = com.owzo.btbatteryntfy.net.NtfyClient.resolveEndpoint(
-            settings.serverUrlOrEndpoint,
-            settings.topic,
+        val disconnectedAtMs = System.currentTimeMillis()
+        val disconnectClock = disconnectClockFormatter.format(
+            LocalDateTime.ofInstant(Instant.ofEpochMilli(disconnectedAtMs), ZoneId.systemDefault()),
         )
-        if (endpoint == null) {
-            appPreferences.updateLastSendResult("Last disconnect summary: invalid ntfy URL or topic")
-            appPreferences.appendLog("Disconnect summary for $deviceLabel skipped because ntfy is not configured correctly.")
+        val summaryText = "$deviceLabel disconnected at $batteryPercent% — $disconnectClock"
+        val summarySignature = "$deviceIdentity|$batteryPercent|$seenAtMs"
+
+        if (appPreferences.shouldSkipDisconnectSummary(deviceIdentity, summarySignature)) {
+            appPreferences.appendLog("Duplicate disconnect summary suppressed for $deviceLabel.")
             return
         }
 
-        val dispatchAttemptAtMs = System.currentTimeMillis()
-        when (val reservation = appPreferences.reserveNotificationIfAllowed(deviceIdentity, settings.cooldownMillis, dispatchAttemptAtMs)) {
-            is NotificationReservation.CooldownActive -> {
-                appPreferences.appendLog(
-                    "$deviceLabel disconnect summary is on cooldown until ${formatReadableTimestamp(reservation.nextAllowedAtMs)}.",
-                )
-            }
+        BatteryNotificationController.showDisconnectSummary(
+            context = context,
+            contentText = summaryText,
+            summarySignature = summarySignature,
+        )
 
-            is NotificationReservation.PendingSend -> {
-                appPreferences.appendLog("$deviceLabel disconnect summary is already being sent.")
-            }
+        appPreferences.markDisconnectSummaryShown(
+            deviceIdentity = deviceIdentity,
+            summarySignature = summarySignature,
+            disconnectedAtMs = disconnectedAtMs,
+        )
+        appPreferences.updateLastDisconnectSummary("Last disconnect summary: $summaryText")
+        appPreferences.appendLog("Disconnect summary notification shown: $summaryText ($reason).")
+    }
 
-            NotificationReservation.Reserved -> {
-                val result = com.owzo.btbatteryntfy.net.NtfyClient.send(
-                    endpoint = endpoint,
-                    authorizationHeader = settings.authorizationHeader,
-                    title = deviceLabel,
-                    message = buildDisconnectSummaryMessage(
-                        deviceLabel = deviceLabel,
-                        batteryPercent = confirmedBatteryPercent,
-                        seenAtMs = seenAtMs,
-                    ),
-                )
-
-                if (result.success) {
-                    appPreferences.markNotificationSent(deviceIdentity, confirmedBatteryPercent, dispatchAttemptAtMs)
-                    appPreferences.updateLastSendResult(
-                        "Last disconnect summary: sent for $deviceLabel at ${confirmedBatteryPercent}%",
-                    )
-                    appPreferences.appendLog(
-                        "Disconnect summary sent for $deviceLabel at ${confirmedBatteryPercent}% ($reason).",
-                    )
-                } else {
-                    appPreferences.clearPendingNotificationReservation(deviceIdentity)
-                    appPreferences.updateLastSendResult("Last disconnect summary: ${result.details}")
-                    appPreferences.appendLog("Disconnect summary failed for $deviceLabel: ${result.details}.")
-                }
-            }
+    fun processDisconnectSummaryDismissed(context: Context, summarySignature: String) {
+        if (summarySignature.isBlank()) {
+            return
         }
+
+        val appPreferences = AppPreferences(context)
+        appPreferences.markDisconnectSummaryDismissed(summarySignature)
+        appPreferences.appendLog("Disconnect summary notification dismissed.")
     }
 
     fun displayName(deviceName: String?, deviceAddress: String?): String {
@@ -207,19 +210,4 @@ object BatteryMonitorEngine {
         notificationTimestampFormatter.format(
             LocalDateTime.ofInstant(Instant.ofEpochMilli(timestampMs), ZoneId.systemDefault()),
         )
-
-    private fun buildDisconnectSummaryMessage(
-        deviceLabel: String,
-        batteryPercent: Int,
-        seenAtMs: Long,
-    ): String {
-        return buildString {
-            append(deviceLabel)
-            append('\n')
-            append("Battery: ")
-            append(batteryPercent)
-            append("% @ ")
-            append(formatNotificationTimestamp(seenAtMs))
-        }
-    }
 }

@@ -11,6 +11,7 @@ import android.content.Intent
 import androidx.core.content.IntentCompat
 import com.owzo.btbatteryntfy.AppConstants
 import com.owzo.btbatteryntfy.data.AppPreferences
+import com.owzo.btbatteryntfy.data.AppSettings
 import com.owzo.btbatteryntfy.data.AudioProfileKey
 import kotlin.math.roundToInt
 
@@ -19,6 +20,15 @@ class SystemEventReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         val appContext = context.applicationContext
         val appPreferences = AppPreferences(appContext)
+
+        if (action == AppConstants.ACTION_NOTIFICATION_DISMISSED) {
+            BatteryMonitorEngine.processDisconnectSummaryDismissed(
+                context = appContext,
+                summarySignature = intent.getStringExtra(AppConstants.EXTRA_NOTIFICATION_SIGNATURE).orEmpty(),
+            )
+            return
+        }
+
         val settings = appPreferences.loadSettings()
         val device = extractDevice(intent)
         val deviceName = BatteryMonitorEngine.safeDeviceName(device)
@@ -31,7 +41,7 @@ class SystemEventReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
             -> {
                 if (settings.monitoringEnabled) {
-                    appPreferences.appendLog("Phone restarted. Checking connected headphones.")
+                    appPreferences.appendLog("Phone restarted. Refreshing Bluetooth battery snapshot.")
                     MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = action)
                 }
             }
@@ -41,10 +51,15 @@ class SystemEventReceiver : BroadcastReceiver() {
                     return
                 }
 
-                val state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
-                if (state == BluetoothAdapter.STATE_ON) {
-                    appPreferences.appendLog("Bluetooth turned on. Checking connected headphones.")
-                    MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = "adapter_on")
+                when (intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)) {
+                    BluetoothAdapter.STATE_ON -> {
+                        appPreferences.appendLog("Bluetooth turned on. Refreshing connected headset battery.")
+                        MonitoringWorkScheduler.enqueueSnapshot(appContext, reason = "adapter_on")
+                    }
+
+                    BluetoothAdapter.STATE_OFF -> {
+                        appPreferences.appendLog("Bluetooth turned off.")
+                    }
                 }
             }
 
@@ -53,8 +68,17 @@ class SystemEventReceiver : BroadcastReceiver() {
                     return
                 }
 
+                appPreferences.markAudioProfileConnection(
+                    deviceIdentity = identity,
+                    deviceName = deviceName,
+                    deviceAddress = deviceAddress,
+                    profileKey = AudioProfileKey.A2DP,
+                    connected = true,
+                )
+                appPreferences.clearDismissedSummaryMarker()
                 MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
-                appPreferences.appendLog("$deviceLabel connected. Checking battery.")
+                appPreferences.clearDisconnectCheckPending(identity)
+                appPreferences.appendLog("$deviceLabel connected. Refreshing battery snapshot.")
                 MonitoringWorkScheduler.enqueueSnapshot(
                     context = appContext,
                     reason = "acl_connected",
@@ -167,7 +191,7 @@ class SystemEventReceiver : BroadcastReceiver() {
     private fun handleProfileConnectionStateChange(
         appContext: Context,
         appPreferences: AppPreferences,
-        settings: com.owzo.btbatteryntfy.data.AppSettings,
+        settings: AppSettings,
         device: BluetoothDevice?,
         profileKey: AudioProfileKey,
         source: String,
@@ -187,8 +211,10 @@ class SystemEventReceiver : BroadcastReceiver() {
                     profileKey = profileKey,
                     connected = true,
                 )
+                appPreferences.clearDismissedSummaryMarker()
                 MonitoringWorkScheduler.cancelDisconnectCheck(appContext, identity)
-                appPreferences.appendLog("$deviceLabel connected. Checking battery.")
+                appPreferences.clearDisconnectCheckPending(identity)
+                appPreferences.appendLog("$deviceLabel connected. Refreshing battery snapshot.")
                 MonitoringWorkScheduler.enqueueSnapshot(
                     context = appContext,
                     reason = "${source}_connected",
@@ -224,15 +250,22 @@ class SystemEventReceiver : BroadcastReceiver() {
     private fun scheduleDisconnectCheck(
         appContext: Context,
         appPreferences: AppPreferences,
-        settings: com.owzo.btbatteryntfy.data.AppSettings,
+        settings: AppSettings,
         deviceIdentity: String,
         deviceName: String?,
         deviceAddress: String?,
         deviceLabel: String,
         reason: String,
     ) {
+        val nowMs = System.currentTimeMillis()
+        val newlyPending = appPreferences.markDisconnectCheckPending(deviceIdentity, nowMs)
+        if (!newlyPending) {
+            appPreferences.appendLog("Duplicate disconnect signal suppressed for $deviceLabel.")
+            return
+        }
+
         appPreferences.appendLog(
-            "$deviceLabel disconnected. Waiting ${settings.disconnectDelaySeconds}s before sending battery summary.",
+            "$deviceLabel disconnected. Waiting ${settings.disconnectDelaySeconds}s before showing summary.",
         )
         MonitoringWorkScheduler.enqueueDisconnectCheck(
             context = appContext,

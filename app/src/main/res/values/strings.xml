@@ -1,21 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">BT Battery Ntfy</string>
-    <string name="subtitle">Track headphone battery while connected and send the last seen percentage to ntfy after they disconnect.</string>
+    <string name="app_name">BT Battery Log</string>
+    <string name="subtitle">Shows a persistent Bluetooth battery notification while your headset is connected, then keeps a dismissible disconnect summary.</string>
     <string name="enable_monitoring">Enable monitoring</string>
-    <string name="server_url_label">ntfy server URL or full endpoint</string>
-    <string name="topic_label">Topic (leave blank if the URL already includes it)</string>
-    <string name="auth_label">Authorization header or raw user:pass (optional)</string>
-    <string name="cooldown_hours_label">Cooldown hours</string>
     <string name="disconnect_delay_label">Disconnect delay seconds</string>
-    <string name="save_settings">Refresh now</string>
-    <string name="send_test_notification">Send test notification</string>
+    <string name="refresh_now">Refresh now</string>
     <string name="clear_debug_logs">Clear debug logs</string>
     <string name="debug_log_header">Recent events</string>
     <string name="monitoring_disabled">Monitoring disabled</string>
     <string name="monitoring_enabled">Monitoring enabled</string>
     <string name="permission_missing">Bluetooth permission missing</string>
     <string name="no_recent_battery_event">Last battery seen: none</string>
-    <string name="no_recent_send_result">Last disconnect summary: none</string>
+    <string name="no_recent_disconnect_summary">Last disconnect summary: none</string>
     <string name="no_debug_logs">No events yet.</string>
 </resources>

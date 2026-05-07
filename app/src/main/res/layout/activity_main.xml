@@ -49,74 +49,18 @@
             android:textAppearance="?attr/textAppearanceBodySmall" />
 
         <TextView
-            android:id="@+id/lastSendResultText"
+            android:id="@+id/lastDisconnectSummaryText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:textAppearance="?attr/textAppearanceBodySmall" />
 
         <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/serverInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:hint="@string/server_url_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/serverInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="textUri" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/topicInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/topic_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/topicInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/authInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/auth_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/authInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="text" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
-            android:id="@+id/cooldownHoursInputLayout"
-            style="@style/Widget.BtBatteryNtfy.TextInputLayout"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="@string/cooldown_hours_label">
-
-            <com.google.android.material.textfield.TextInputEditText
-                android:id="@+id/cooldownHoursInput"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:inputType="number" />
-        </com.google.android.material.textfield.TextInputLayout>
-
-        <com.google.android.material.textfield.TextInputLayout
             android:id="@+id/disconnectDelayInputLayout"
             style="@style/Widget.BtBatteryNtfy.TextInputLayout"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
             android:hint="@string/disconnect_delay_label">
 
             <com.google.android.material.textfield.TextInputEditText
@@ -132,14 +76,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="@string/save_settings" />
-
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/testButton"
-            style="@style/Widget.BtBatteryNtfy.ActionButton"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="@string/send_test_notification" />
+            android:text="@string/refresh_now" />
 
         <com.google.android.material.button.MaterialButton
             android:id="@+id/clearLogsButton"
