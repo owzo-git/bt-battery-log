@@ -4,7 +4,10 @@ import android.Manifest
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.TypedValue
 import android.view.View
+import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
@@ -12,6 +15,7 @@ import androidx.core.widget.doAfterTextChanged
 import com.google.android.material.snackbar.Snackbar
 import com.owzo.btbatteryntfy.data.AppPreferences
 import com.owzo.btbatteryntfy.data.AppSettings
+import com.owzo.btbatteryntfy.data.StatusSnapshot
 import com.owzo.btbatteryntfy.databinding.ActivityMainBinding
 import com.owzo.btbatteryntfy.monitor.BatteryMonitorEngine
 import com.owzo.btbatteryntfy.monitor.BatteryNotificationController
@@ -43,7 +47,7 @@ class MainActivity : AppCompatActivity() {
                 binding.monitoringSwitch.isChecked = false
                 persistSettings(monitoringEnabled = false)
                 appPreferences.appendDebugLog("Bluetooth permission denied. Monitoring remains disabled.")
-                showSnackbar("Bluetooth permission is required for monitoring.")
+                showSnackbar(getString(R.string.bluetooth_permission_required))
             }
         }
 
@@ -98,13 +102,13 @@ class MainActivity : AppCompatActivity() {
 
         binding.refreshNowButton.setOnClickListener {
             if (!binding.monitoringSwitch.isChecked) {
-                showSnackbar("Enable monitoring first.")
+                showSnackbar(getString(R.string.enable_monitoring_first))
                 return@setOnClickListener
             }
 
             appPreferences.appendDebugLog("Manual refresh requested.")
             MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "manual_refresh")
-            showSnackbar("Refresh scheduled.")
+            showSnackbar(getString(R.string.refresh_scheduled))
         }
 
         binding.toggleDebugButton.setOnClickListener {
@@ -141,7 +145,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val notificationsEnabled = NotificationManagerCompat.from(this).areNotificationsEnabled()
-        val notificationsSummary = if (notificationsEnabled) "" else " (notifications blocked)"
+        val notificationsSummary = if (notificationsEnabled) "" else " (${getString(R.string.notifications_blocked)})"
 
         binding.monitoringStatusText.text = buildString {
             append(
@@ -155,9 +159,172 @@ class MainActivity : AppCompatActivity() {
             append(notificationsSummary)
         }
 
-        binding.activityFeedText.text = status.activityFeedText.ifBlank { getString(R.string.no_activity_events) }
+        val activityFeed = status.activityFeedText.ifBlank { getString(R.string.no_activity_events) }
+        val activityItems = parseActivityFeed(status.activityFeedText)
+        binding.activityFeedText.text = activityFeed
+        renderStatusCard(
+            status = status,
+            activityItems = activityItems,
+            notificationsEnabled = notificationsEnabled,
+        )
+        renderActivityFeed(activityItems)
         binding.debugLogText.text = status.debugLogText.ifBlank { getString(R.string.no_debug_logs) }
         applyDebugVisibility()
+    }
+
+    private fun renderStatusCard(
+        status: StatusSnapshot,
+        activityItems: List<ActivityFeedItem>,
+        notificationsEnabled: Boolean,
+    ) {
+        binding.notificationStateChip.text = getString(
+            if (notificationsEnabled) R.string.notifications_ok else R.string.notifications_blocked,
+        )
+
+        val connectedState = appPreferences.getConnectedNotificationState()
+        if (connectedState != null) {
+            val deviceLabel = BatteryMonitorEngine.displayName(
+                connectedState.deviceName,
+                connectedState.deviceAddress,
+            )
+            binding.statusDeviceNameText.text = deviceLabel
+            binding.statusSummaryText.text = getString(
+                R.string.battery_connected_summary,
+                connectedState.batteryPercent,
+            )
+            binding.statusTimestampText.text = getString(
+                R.string.status_last_update,
+                status.lastBatteryEvent.extractBatteryEventTime()
+                    ?: activityItems.firstOrNull { it.deviceName == deviceLabel }?.timestamp
+                    ?: getString(R.string.status_no_data),
+            )
+            binding.connectionStateChip.text = getString(R.string.status_connected)
+            return
+        }
+
+        val latest = activityItems.firstOrNull()
+        if (latest == null) {
+            binding.statusDeviceNameText.text = getString(R.string.status_no_headset_seen)
+            binding.statusSummaryText.text = getString(R.string.status_waiting_for_data)
+            binding.statusTimestampText.text = getString(R.string.status_last_update_none)
+            binding.connectionStateChip.text = getString(R.string.status_no_data)
+            return
+        }
+
+        binding.statusDeviceNameText.text = latest.deviceName
+        binding.statusSummaryText.text = if (latest.status == ActivityFeedStatus.DISCONNECTED) {
+            getString(
+                R.string.battery_status_summary,
+                latest.batteryPercent,
+                getString(R.string.status_last_seen_time, latest.timeOnly()),
+            )
+        } else {
+            getString(R.string.battery_status_summary, latest.batteryPercent, latest.status.displayText(this))
+        }
+        binding.statusTimestampText.text = getString(
+            if (latest.status == ActivityFeedStatus.DISCONNECTED) {
+                R.string.status_disconnected_at
+            } else {
+                R.string.status_last_update
+            },
+            latest.timestamp,
+        )
+        binding.connectionStateChip.text = when (latest.status) {
+            ActivityFeedStatus.DISCONNECTED -> getString(R.string.status_disconnected)
+            ActivityFeedStatus.CONNECTED,
+            ActivityFeedStatus.UPDATED,
+            -> getString(R.string.status_connected)
+            ActivityFeedStatus.NOTIFICATION_DISMISSED -> latest.status.displayText(this)
+        }
+    }
+
+    private fun renderActivityFeed(items: List<ActivityFeedItem>) {
+        binding.activityFeedList.removeAllViews()
+        binding.activityFeedEmptyText.visibility = if (items.isEmpty()) View.VISIBLE else View.GONE
+        binding.activityFeedList.visibility = if (items.isEmpty()) View.GONE else View.VISIBLE
+
+        items.forEachIndexed { index, item ->
+            if (index > 0) {
+                binding.activityFeedList.addView(
+                    View(this).apply {
+                        layoutParams = LinearLayout.LayoutParams(
+                            LinearLayout.LayoutParams.MATCH_PARENT,
+                            dp(1),
+                        )
+                        setBackgroundColor(
+                            resolveThemeColor(com.google.android.material.R.attr.colorOutlineVariant),
+                        )
+                    },
+                )
+            }
+
+            binding.activityFeedList.addView(
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(
+                        0,
+                        if (index == 0) 0 else dp(12),
+                        0,
+                        if (index == items.lastIndex) 0 else dp(12),
+                    )
+                    addView(activityFeedTextView(item.deviceName, primary = true))
+                    addView(
+                        activityFeedTextView(
+                            getString(
+                                R.string.activity_feed_battery_status,
+                                item.batteryPercent,
+                                item.status.displayText(this@MainActivity),
+                            ),
+                        ),
+                    )
+                    addView(activityFeedTextView(item.timestamp, secondary = true))
+                },
+            )
+        }
+    }
+
+    private fun activityFeedTextView(
+        value: String,
+        primary: Boolean = false,
+        secondary: Boolean = false,
+    ): TextView {
+        return TextView(this).apply {
+            text = value
+            setTextAppearance(
+                when {
+                    primary -> com.google.android.material.R.style.TextAppearance_Material3_TitleMedium
+                    secondary -> com.google.android.material.R.style.TextAppearance_Material3_BodySmall
+                    else -> com.google.android.material.R.style.TextAppearance_Material3_BodyMedium
+                },
+            )
+            setTextColor(
+                resolveThemeColor(
+                    if (secondary) {
+                        com.google.android.material.R.attr.colorOnSurfaceVariant
+                    } else {
+                        com.google.android.material.R.attr.colorOnSurface
+                    },
+                ),
+            )
+            if (primary) {
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+        }
+    }
+
+    private fun parseActivityFeed(rawFeed: String): List<ActivityFeedItem> {
+        return rawFeed.lines()
+            .mapNotNull { line ->
+                val match = ACTIVITY_FEED_LINE_REGEX.matchEntire(line.trim()) ?: return@mapNotNull null
+                val batteryPercent = match.groupValues[3].toIntOrNull()?.takeIf { it in 0..100 }
+                    ?: return@mapNotNull null
+                ActivityFeedItem(
+                    timestamp = match.groupValues[1],
+                    deviceName = match.groupValues[2],
+                    batteryPercent = batteryPercent,
+                    status = ActivityFeedStatus.fromStoredLabel(match.groupValues[4]),
+                )
+            }
     }
 
     private fun applyDebugVisibility() {
@@ -210,8 +377,63 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun resolveThemeColor(attribute: Int): Int {
+        val typedValue = TypedValue()
+        theme.resolveAttribute(attribute, typedValue, true)
+        return typedValue.data
+    }
+
+    private fun dp(value: Int): Int {
+        return (value * resources.displayMetrics.density).toInt()
+    }
+
+    private fun String.extractBatteryEventTime(): String? {
+        return substringAfter(" @ ", missingDelimiterValue = "")
+            .takeIf { it.isNotBlank() }
+    }
+
+    private data class ActivityFeedItem(
+        val timestamp: String,
+        val deviceName: String,
+        val batteryPercent: Int,
+        val status: ActivityFeedStatus,
+    ) {
+        fun timeOnly(): String = timestamp.substringAfterLast(' ')
+    }
+
+    private enum class ActivityFeedStatus {
+        CONNECTED,
+        UPDATED,
+        DISCONNECTED,
+        NOTIFICATION_DISMISSED,
+        ;
+
+        fun displayText(activity: MainActivity): String {
+            return when (this) {
+                CONNECTED -> activity.getString(R.string.status_connected)
+                UPDATED -> activity.getString(R.string.status_updated)
+                DISCONNECTED -> activity.getString(R.string.status_disconnected)
+                NOTIFICATION_DISMISSED -> activity.getString(R.string.status_notification_dismissed)
+            }
+        }
+
+        companion object {
+            fun fromStoredLabel(label: String): ActivityFeedStatus {
+                return when (label.lowercase()) {
+                    "connected" -> CONNECTED
+                    "updated" -> UPDATED
+                    "disconnected" -> DISCONNECTED
+                    "notification dismissed" -> NOTIFICATION_DISMISSED
+                    else -> UPDATED
+                }
+            }
+        }
+    }
+
     companion object {
         private const val AUTO_SAVE_DELAY_MS = 500L
         private const val KEY_DEBUG_VISIBLE = "debug_visible"
+        private val ACTIVITY_FEED_LINE_REGEX =
+            Regex("""^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) (.+) (\d{1,3})% \((.+)\)$""")
     }
 }
