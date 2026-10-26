@@ -1,7 +1,7 @@
 # Shokz OpenFit 2+ battery (experimental)
 
 Status: issue #1 — **Milestone A** (transport) validated on Android 15; **Milestone B** (opt-in
-left/right/case in the normal app flow) implemented, on-device check pending.
+left/right/case in the normal app flow) implemented and checked on-device (B1–B5 pass).
 
 The app can read left bud, right bud and charging case battery from a connected Shokz OpenFit over
 the vendor RFCOMM service (SDP UUID `0000fef0-0000-1000-8000-00805f9b34fb`), using only public
@@ -94,6 +94,11 @@ No MAC addresses or full frames are logged.
 | 2026-10-26 | Sony XQ-DC54 / 15 | c | L 100% · R 100% · Case 60% | 1418 ms | audiobook playing; no audible glitch, player stayed `PLAYING` |
 | 2026-10-26 | Sony XQ-DC54 / 15 | e, right bud in case | L 100% · R 100% · Case 60% | 1709 ms | payload unchanged (`00090900`); a full bud in the case still reports 9, so in-case state is not visible from `0x03` |
 | 2026-10-26 | Sony XQ-DC54 / 15 | e, both buds in closed case | `No connected OpenFit found.` | — | headset disconnected (ACL) ~15 s before; no socket was opened, no stale values shown |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B1 | no vendor read; notification `OpenFit 2+ by Shokz — 100%` | — | setting off |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B2 | one `vendor read ok (connected)` 6 s after connect; notification `… — L 100% · R 100% · Case 60%` | 1347 ms | two connect events (1 s apart) gave one read; session block flag reset on reconnect |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B3 | one `vendor read failed (connected) … paused`; no further automatic reads; notification `… — 100%`; card `Last known: … Read 18:59` | — | Shokz app open; as in scenario b it then shows "Device disconnected. Attempting to reconnect…" |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B4 | summary `… disconnected at 100% — 18:59 Before disconnect (18:58): L 100% · R 100% · Case 60%` | — | no socket opened while disconnected |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B5 | one `vendor read ok (manual)`; card and notification updated | 1491 ms | |
 
 ### Finding: a failed read disconnects the official Shokz app
 
@@ -111,3 +116,11 @@ Implications for Milestone B:
 - Safest default: Shokz reads stay opt-in (setting off by default), with a clear warning, and are
   done at most once per connect plus rarely after that. After a `CONNECT_FAILED`, back off for the
   rest of the session instead of retrying.
+
+### Known limitation: Bluetooth toggled off and on
+
+Turning the phone's Bluetooth off does not deliver an ACL disconnect for the headset, so the app
+does not start a new session when it comes back. Until the headset itself disconnects and
+reconnects, the CONNECTED read is skipped (it already ran this session) and a `CONNECT_FAILED` block
+stays in place. "Refresh now" still reads. This matches how the existing session tracking handles
+the toggle.
