@@ -13,6 +13,7 @@ import com.owzo.btbatteryntfy.AppConstants
 import com.owzo.btbatteryntfy.data.AppPreferences
 import com.owzo.btbatteryntfy.data.AppSettings
 import com.owzo.btbatteryntfy.data.AudioProfileKey
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzRefreshCoordinator
 import kotlin.math.roundToInt
 
 class SystemEventReceiver : BroadcastReceiver() {
@@ -99,6 +100,7 @@ class SystemEventReceiver : BroadcastReceiver() {
                 }
 
                 appPreferences.markAllAudioProfilesDisconnected(identity, deviceName, deviceAddress)
+                ShokzRefreshCoordinator.cancel(appContext, deviceAddress)
                 scheduleDisconnectCheck(
                     appContext = appContext,
                     appPreferences = appPreferences,
@@ -239,6 +241,7 @@ class SystemEventReceiver : BroadcastReceiver() {
                 )
 
                 if (!appPreferences.getTrackedDeviceState(identity).isAudioSessionActive) {
+                    ShokzRefreshCoordinator.cancel(appContext, deviceAddress)
                     scheduleDisconnectCheck(
                         appContext = appContext,
                         appPreferences = appPreferences,

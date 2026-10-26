@@ -9,6 +9,12 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import com.owzo.btbatteryntfy.data.ActivityEventType
 import com.owzo.btbatteryntfy.data.AppPreferences
+import com.owzo.btbatteryntfy.data.AppSettings
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzBatteryStatus
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzComponentFormatter
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzComponents
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadTrigger
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzRefreshCoordinator
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
@@ -84,7 +90,13 @@ object BatteryMonitorEngine {
         )
         appPreferences.clearDismissedSummaryMarker()
 
-        val connectedText = "$deviceLabel — ${sample.batteryPercent}%"
+        val connectedText = connectedNotificationText(
+            appPreferences = appPreferences,
+            settings = settings,
+            deviceIdentity = identity,
+            deviceLabel = deviceLabel,
+            batteryPercent = sample.batteryPercent,
+        )
         appPreferences.setConnectedNotificationState(
             deviceIdentity = identity,
             deviceName = sample.deviceName,
@@ -127,6 +139,100 @@ object BatteryMonitorEngine {
                     "$deviceLabel battery changed: $previousBattery% — ${sample.batteryPercent}%.",
                 )
             }
+        }
+
+        if (previousBattery != sample.batteryPercent) {
+            ShokzRefreshCoordinator.schedule(
+                context = context,
+                deviceName = sample.deviceName,
+                deviceAddress = sample.deviceAddress,
+                trigger = if (previousBattery == null) ShokzReadTrigger.CONNECTED else ShokzReadTrigger.BATTERY_CHANGED,
+            )
+        }
+    }
+
+    /**
+     * Stores a vendor left/right/case reading and refreshes the connected notification if it shows
+     * this headset. Only the parts present in [status] change; the single Android percent is untouched.
+     */
+    fun processShokzStatus(
+        context: Context,
+        deviceName: String?,
+        deviceAddress: String?,
+        status: ShokzBatteryStatus,
+    ) {
+        if (!status.hasAnyValue) {
+            return
+        }
+        val appPreferences = AppPreferences(context)
+        val identity = stableDeviceIdentity(deviceName, deviceAddress)
+        val deviceLabel = displayName(deviceName, deviceAddress)
+        val merged = appPreferences.getShokzComponents(identity).mergedWith(status)
+        appPreferences.saveShokzComponents(identity, deviceName, merged)
+        appPreferences.appendDebugLog(
+            "$deviceLabel vendor battery: ${ShokzComponentFormatter.compact(ShokzComponents().mergedWith(status))}.",
+        )
+
+        val settings = appPreferences.loadSettings()
+        if (!settings.monitoringEnabled) {
+            return
+        }
+        val connectedState = appPreferences.getConnectedNotificationState() ?: return
+        if (connectedState.deviceIdentity != identity) {
+            return
+        }
+        val connectedText = connectedNotificationText(
+            appPreferences = appPreferences,
+            settings = settings,
+            deviceIdentity = identity,
+            deviceLabel = deviceLabel,
+            batteryPercent = connectedState.batteryPercent,
+        )
+        if (connectedText == connectedState.contentText) {
+            return
+        }
+        appPreferences.setConnectedNotificationState(
+            deviceIdentity = identity,
+            deviceName = connectedState.deviceName,
+            deviceAddress = connectedState.deviceAddress,
+            batteryPercent = connectedState.batteryPercent,
+            contentText = connectedText,
+        )
+        BatteryNotificationController.showConnected(
+            context = context,
+            contentText = connectedText,
+            deviceIdentity = identity,
+            deviceName = connectedState.deviceName,
+            deviceAddress = connectedState.deviceAddress,
+            batteryPercent = connectedState.batteryPercent,
+        )
+    }
+
+    /** Vendor parts read during the current connection; empty when the feature is off. */
+    fun currentShokzComponents(
+        appPreferences: AppPreferences,
+        settings: AppSettings,
+        deviceIdentity: String,
+    ): ShokzComponents {
+        if (!settings.shokzVendorReadEnabled) {
+            return ShokzComponents()
+        }
+        val sessionStartedAtMs = appPreferences.getShokzSessionState(deviceIdentity).sessionStartedAtMs
+        return appPreferences.getShokzComponents(deviceIdentity).sampledSince(sessionStartedAtMs)
+    }
+
+    private fun connectedNotificationText(
+        appPreferences: AppPreferences,
+        settings: AppSettings,
+        deviceIdentity: String,
+        deviceLabel: String,
+        batteryPercent: Int,
+    ): String {
+        val components = currentShokzComponents(appPreferences, settings, deviceIdentity)
+        return if (components.isEmpty) {
+            "$deviceLabel — $batteryPercent%"
+        } else {
+            "$deviceLabel — ${ShokzComponentFormatter.notification(components, batteryPercent)}"
         }
     }
 
@@ -179,7 +285,15 @@ object BatteryMonitorEngine {
         val disconnectClock = disconnectClockFormatter.format(
             LocalDateTime.ofInstant(Instant.ofEpochMilli(disconnectedAtMs), ZoneId.systemDefault()),
         )
-        val summaryText = "$deviceLabel disconnected at $batteryPercent% — $disconnectClock"
+        // Values captured while still connected; no vendor read happens after a disconnect.
+        val shokzComponents = currentShokzComponents(appPreferences, settings, deviceIdentity)
+        // Shokz parts, when read this connection, replace the single percent and the clock; the
+        // notification already carries its own time.
+        val summaryText = if (shokzComponents.isEmpty) {
+            "$deviceLabel disconnected at $batteryPercent% — $disconnectClock"
+        } else {
+            "$deviceLabel disconnected at ${ShokzComponentFormatter.compact(shokzComponents)}"
+        }
         val summarySignature = "$deviceIdentity|$batteryPercent|$seenAtMs"
 
         val suppressionReason = appPreferences.disconnectSummarySuppressionReason(
