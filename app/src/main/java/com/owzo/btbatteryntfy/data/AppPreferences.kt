@@ -3,6 +3,11 @@ package com.owzo.btbatteryntfy.data
 import android.content.Context
 import android.content.SharedPreferences
 import com.owzo.btbatteryntfy.AppConstants
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzComponentReading
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzComponents
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadPolicy
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadTrigger
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzSessionState
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
@@ -41,6 +46,7 @@ class AppPreferences(context: Context) {
                 AppSettings.DEFAULT_DISCONNECT_DELAY_SECONDS,
             ),
             monitoringEnabled = prefs.getBoolean(KEY_MONITORING_ENABLED, false),
+            shokzVendorReadEnabled = prefs.getBoolean(KEY_SHOKZ_VENDOR_READ_ENABLED, false),
         )
     }
 
@@ -48,6 +54,7 @@ class AppPreferences(context: Context) {
         prefs.edit()
             .putInt(KEY_DISCONNECT_DELAY_SECONDS, settings.disconnectDelaySeconds)
             .putBoolean(KEY_MONITORING_ENABLED, settings.monitoringEnabled)
+            .putBoolean(KEY_SHOKZ_VENDOR_READ_ENABLED, settings.shokzVendorReadEnabled)
             .commit()
     }
 
@@ -253,6 +260,10 @@ class AppPreferences(context: Context) {
         if (connected && !wasActive) {
             editor.remove("${base}_last_seen_battery")
             editor.remove("${base}_last_seen_at_ms")
+            // New connection: vendor readings from before now count as last-known, and a refused
+            // vendor channel in the previous connection no longer blocks reads.
+            editor.putLong("${base}_session_started_at_ms", System.currentTimeMillis())
+            editor.putBoolean("${base}_shokz_blocked", false)
         }
 
         if (connected) {
@@ -355,6 +366,92 @@ class AppPreferences(context: Context) {
         prefs.edit().remove(KEY_DISMISSED_DISCONNECT_SIGNATURE).commit()
     }
 
+    fun getShokzComponents(deviceIdentity: String): ShokzComponents = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        fun reading(part: String): ShokzComponentReading? {
+            val percent = prefs.getInt("${base}_shokz_$part", -1)
+            val atMs = prefs.getLong("${base}_shokz_${part}_at_ms", 0L)
+            return if (percent in 0..100 && atMs > 0L) ShokzComponentReading(percent, atMs) else null
+        }
+        ShokzComponents(left = reading("left"), right = reading("right"), case = reading("case"))
+    }
+
+    fun saveShokzComponents(
+        deviceIdentity: String,
+        deviceName: String?,
+        components: ShokzComponents,
+    ) = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        val editor = prefs.edit()
+            .putString(KEY_LAST_SHOKZ_DEVICE_IDENTITY, deviceIdentity)
+            .putString(KEY_LAST_SHOKZ_DEVICE_NAME, deviceName?.trim().orEmpty())
+        fun put(part: String, reading: ShokzComponentReading?) {
+            if (reading == null) {
+                editor.remove("${base}_shokz_$part").remove("${base}_shokz_${part}_at_ms")
+            } else {
+                editor.putInt("${base}_shokz_$part", reading.percent)
+                    .putLong("${base}_shokz_${part}_at_ms", reading.sampledAtMs)
+            }
+        }
+        put("left", components.left)
+        put("right", components.right)
+        put("case", components.case)
+        editor.commit()
+    }
+
+    /** Identity and name of the last headset with vendor readings, for the status card. */
+    fun getLastShokzDevice(): Pair<String, String?>? = synchronized(LOCK) {
+        val identity = prefs.getString(KEY_LAST_SHOKZ_DEVICE_IDENTITY, "").orEmpty()
+        if (identity.isBlank()) {
+            return@synchronized null
+        }
+        identity to prefs.getString(KEY_LAST_SHOKZ_DEVICE_NAME, "").orEmpty().ifBlank { null }
+    }
+
+    fun getShokzSessionState(deviceIdentity: String): ShokzSessionState = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        ShokzSessionState(
+            sessionStartedAtMs = prefs.getLong("${base}_session_started_at_ms", 0L),
+            lastAttemptAtMs = prefs.getLong("${base}_shokz_last_attempt_at_ms", 0L),
+            lastSuccessAtMs = prefs.getLong("${base}_shokz_last_success_at_ms", 0L),
+            blockedInSession = prefs.getBoolean("${base}_shokz_blocked", false),
+        )
+    }
+
+    /**
+     * Checks [ShokzReadPolicy] and, if a read is allowed, records the attempt in the same step so
+     * concurrent workers never open the vendor channel twice.
+     */
+    fun tryClaimShokzRead(deviceIdentity: String, trigger: ShokzReadTrigger, nowMs: Long): Boolean =
+        synchronized(LOCK) {
+            val base = deviceBase(deviceIdentity)
+            if (prefs.getLong("${base}_session_started_at_ms", 0L) <= 0L) {
+                // Already connected before we saw a connect event (e.g. monitoring just enabled).
+                prefs.edit().putLong("${base}_session_started_at_ms", nowMs).commit()
+            }
+            if (!ShokzReadPolicy.shouldRead(trigger, getShokzSessionState(deviceIdentity), nowMs)) {
+                return@synchronized false
+            }
+            prefs.edit().putLong("${base}_shokz_last_attempt_at_ms", nowMs).commit()
+            true
+        }
+
+    fun recordShokzReadResult(
+        deviceIdentity: String,
+        succeededAtMs: Long?,
+        blockSession: Boolean,
+    ) = synchronized(LOCK) {
+        val base = deviceBase(deviceIdentity)
+        val editor = prefs.edit()
+        if (succeededAtMs != null) {
+            editor.putLong("${base}_shokz_last_success_at_ms", succeededAtMs)
+        }
+        if (blockSession) {
+            editor.putBoolean("${base}_shokz_blocked", true)
+        }
+        editor.commit()
+    }
+
     fun rawPreferences(): SharedPreferences = prefs
 
     private fun deviceBase(deviceIdentity: String): String {
@@ -368,6 +465,10 @@ class AppPreferences(context: Context) {
     companion object {
         private const val KEY_DISCONNECT_DELAY_SECONDS = "settings_disconnect_delay_seconds"
         private const val KEY_MONITORING_ENABLED = "settings_monitoring_enabled"
+        private const val KEY_SHOKZ_VENDOR_READ_ENABLED = "settings_shokz_vendor_read_enabled"
+
+        private const val KEY_LAST_SHOKZ_DEVICE_IDENTITY = "shokz_last_device_identity"
+        private const val KEY_LAST_SHOKZ_DEVICE_NAME = "shokz_last_device_name"
 
         private const val KEY_LAST_BATTERY_EVENT = "status_last_battery_event"
         private const val KEY_LAST_DISCONNECT_SUMMARY = "status_last_disconnect_summary"

@@ -21,8 +21,11 @@ import com.owzo.btbatteryntfy.databinding.ActivityMainBinding
 import com.owzo.btbatteryntfy.monitor.BatteryMonitorEngine
 import com.owzo.btbatteryntfy.monitor.BatteryNotificationController
 import com.owzo.btbatteryntfy.monitor.MonitoringWorkScheduler
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzComponentFormatter
 import com.owzo.btbatteryntfy.monitor.shokz.ShokzOpenFitBatteryProvider
 import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadResult
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadTrigger
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzRefreshCoordinator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -104,6 +107,24 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+        binding.shokzVendorReadSwitch.setOnCheckedChangeListener { _, isChecked ->
+            if (suppressAutoSave) {
+                return@setOnCheckedChangeListener
+            }
+
+            persistSettings(monitoringEnabled = binding.monitoringSwitch.isChecked)
+            appPreferences.appendDebugLog(
+                if (isChecked) "Shokz left/right/case reads enabled." else "Shokz left/right/case reads disabled.",
+            )
+            if (binding.monitoringSwitch.isChecked) {
+                // Enabling queues the once-per-connection read; disabling restores the single-% text.
+                MonitoringWorkScheduler.enqueueSnapshot(
+                    applicationContext,
+                    reason = if (isChecked) "shokz_enabled" else "shokz_disabled",
+                )
+            }
+        }
+
         setupAutosaveTextField(binding.disconnectDelayInput)
 
         binding.refreshNowButton.setOnClickListener {
@@ -151,11 +172,11 @@ class MainActivity : AppCompatActivity() {
                     return@launch
                 }
 
-                val sections = devices.map { device ->
+                val sections = devices.mapNotNull { device ->
                     val label = BatteryMonitorEngine.displayName(BatteryMonitorEngine.safeDeviceName(device), null)
-                    val result = ShokzOpenFitBatteryProvider.read(applicationContext, device)
-                    appPreferences.appendDebugLog(shokzLogLine(label, result))
-                    shokzResultText(label, result)
+                    // Manual reads always run; the coordinator logs and stores the result.
+                    ShokzRefreshCoordinator.refresh(applicationContext, device, ShokzReadTrigger.MANUAL)
+                        ?.let { shokzResultText(label, it) }
                 }
                 binding.shokzDebugResultText.text = sections.joinToString(separator = "\n\n")
             } finally {
@@ -187,19 +208,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun shokzLogLine(label: String, result: ShokzReadResult): String {
-        return when (result) {
-            is ShokzReadResult.Success -> {
-                val status = result.status
-                "Shokz read OK: $label L ${formatShokzPercent(status.left)} · " +
-                    "R ${formatShokzPercent(status.right)} · Case ${formatShokzPercent(status.case)} " +
-                    "(${result.elapsedMs} ms)."
-            }
-            is ShokzReadResult.Failure ->
-                "Shokz read failed: $label — ${result.failure.label} after ${result.elapsedMs} ms."
-        }
-    }
-
     private fun formatShokzPercent(value: Int?): String {
         return value?.let { "$it%" } ?: getString(R.string.shokz_debug_unknown)
     }
@@ -208,6 +216,7 @@ class MainActivity : AppCompatActivity() {
         suppressAutoSave = true
         binding.disconnectDelayInput.setText(settings.disconnectDelaySeconds.toString())
         binding.monitoringSwitch.isChecked = settings.monitoringEnabled
+        binding.shokzVendorReadSwitch.isChecked = settings.shokzVendorReadEnabled
         suppressAutoSave = false
     }
 
@@ -249,6 +258,7 @@ class MainActivity : AppCompatActivity() {
             activityItems = activityItems,
             notificationsEnabled = notificationsEnabled,
         )
+        renderShokzComponents(settings)
         renderActivityFeed(activityItems)
         binding.debugLogText.text = status.debugLogText.ifBlank { getString(R.string.no_debug_logs) }
         applyDebugVisibility()
@@ -318,6 +328,41 @@ class MainActivity : AppCompatActivity() {
             -> getString(R.string.status_connected)
             ActivityFeedStatus.NOTIFICATION_DISMISSED -> latest.status.displayText(this)
         }
+    }
+
+    /** Left/right/case from the vendor channel; "—" marks parts that were not read. */
+    private fun renderShokzComponents(settings: AppSettings) {
+        val lastDevice = appPreferences.getLastShokzDevice()
+        if (!settings.shokzVendorReadEnabled || lastDevice == null) {
+            binding.statusComponentsText.visibility = View.GONE
+            return
+        }
+
+        val identity = lastDevice.first
+        val allKnown = appPreferences.getShokzComponents(identity)
+        val connected = appPreferences.getConnectedNotificationState()?.deviceIdentity == identity
+        val fresh = if (connected) {
+            BatteryMonitorEngine.currentShokzComponents(appPreferences, settings, identity)
+        } else {
+            null
+        }
+        binding.statusComponentsText.text = when {
+            fresh != null && !fresh.isEmpty -> getString(
+                R.string.shokz_components_fresh,
+                ShokzComponentFormatter.labeled(fresh),
+                BatteryMonitorEngine.formatReadableTimestamp(fresh.latestSampledAtMs),
+            )
+            !allKnown.isEmpty -> getString(
+                R.string.shokz_components_last_known,
+                ShokzComponentFormatter.labeled(allKnown),
+                BatteryMonitorEngine.formatReadableTimestamp(allKnown.latestSampledAtMs),
+            )
+            else -> {
+                binding.statusComponentsText.visibility = View.GONE
+                return
+            }
+        }
+        binding.statusComponentsText.visibility = View.VISIBLE
     }
 
     private fun renderActivityFeed(items: List<ActivityFeedItem>) {
@@ -432,6 +477,7 @@ class MainActivity : AppCompatActivity() {
         return AppSettings(
             disconnectDelaySeconds = disconnectDelaySeconds,
             monitoringEnabled = monitoringEnabled,
+            shokzVendorReadEnabled = binding.shokzVendorReadSwitch.isChecked,
         )
     }
 

@@ -8,7 +8,12 @@ import androidx.work.Worker
 import androidx.work.WorkerParameters
 import com.owzo.btbatteryntfy.AppConstants
 import com.owzo.btbatteryntfy.data.AppPreferences
+import com.owzo.btbatteryntfy.data.AppSettings
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzOpenFitBatteryProvider
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadTrigger
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzRefreshCoordinator
 import java.util.LinkedHashMap
+import kotlinx.coroutines.runBlocking
 
 class SnapshotWorker(
     appContext: Context,
@@ -98,7 +103,32 @@ class SnapshotWorker(
             )
         }
 
+        refreshShokzComponents(settings, requestedAddress, manualRefresh)
         return Result.success()
+    }
+
+    /**
+     * Connected OpenFit headsets get one vendor read shortly after connecting; "Refresh now" reads
+     * right away. Disconnected headsets are never touched.
+     */
+    private fun refreshShokzComponents(settings: AppSettings, requestedAddress: String, manualRefresh: Boolean) {
+        if (!ShokzRefreshCoordinator.isEnabled(settings)) {
+            return
+        }
+        val devices = ShokzOpenFitBatteryProvider.findConnectedDevices(applicationContext)
+            .filter { requestedAddress.isBlank() || it.address == requestedAddress }
+        for (device in devices) {
+            if (manualRefresh) {
+                runBlocking { ShokzRefreshCoordinator.refresh(applicationContext, device, ShokzReadTrigger.MANUAL) }
+            } else {
+                ShokzRefreshCoordinator.schedule(
+                    context = applicationContext,
+                    deviceName = BatteryMonitorEngine.safeDeviceName(device),
+                    deviceAddress = device.address,
+                    trigger = ShokzReadTrigger.CONNECTED,
+                )
+            }
+        }
     }
 
     private fun collectCandidateDevices(adapter: BluetoothAdapter): LinkedHashMap<String, BluetoothDevice> {

@@ -3,6 +3,8 @@ package com.owzo.btbatteryntfy.data
 data class AppSettings(
     val disconnectDelaySeconds: Int = DEFAULT_DISCONNECT_DELAY_SECONDS,
     val monitoringEnabled: Boolean = false,
+    /** Opt-in: opening the Shokz vendor channel disconnects the official Shokz app. */
+    val shokzVendorReadEnabled: Boolean = false,
 ) {
     val disconnectDelayMillis: Long
         get() = disconnectDelaySeconds.coerceAtLeast(5).toLong() * 1000L

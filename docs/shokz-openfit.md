@@ -1,13 +1,58 @@
 # Shokz OpenFit 2+ battery (experimental)
 
-Status: **Milestone A spike** for issue #1 — transport validated on Android 15; all scenarios run (see results below).
+Status: issue #1 — **Milestone A** (transport) validated on Android 15; **Milestone B** (opt-in
+left/right/case in the normal app flow) implemented, on-device check pending.
 
 The app can read left bud, right bud and charging case battery from a connected Shokz OpenFit over
 the vendor RFCOMM service (SDP UUID `0000fef0-0000-1000-8000-00805f9b34fb`), using only public
 Android APIs (`createRfcommSocketToServiceRecord`). The protocol comes from
 [shokz-openfit-battery-sdk](https://github.com/YentlHendrickx/shokz-openfit-battery-sdk) (MIT, Linux).
 
-For now the read is manual and only shown in the debug section; it does not feed notifications.
+Milestone B feeds these readings into the status card, the connected notification and the disconnect
+summary when the user turns on **Settings → Shokz OpenFit left/right/case** (off by default). The
+manual **Read Shokz battery** button in the debug section stays available.
+
+## Milestone B: opt-in readings
+
+**When the app reads** (`ShokzReadPolicy`, all automatic reads also need monitoring on):
+
+| Trigger | Rule |
+|---|---|
+| OpenFit connects (or monitoring/setting turned on while connected) | one read ~5 s later; repeated connect events within 60 s share it; skipped once this connection already has a successful read |
+| Android reports a new single battery % | read only if the last attempt was ≥ 30 min ago |
+| **Refresh now** (setting on) / **Read Shokz battery** (debug, any setting) | always reads, even after a refused channel (user asked) |
+| any read fails with `RFCOMM connect failed` | no more automatic reads until the headset disconnects and reconnects |
+| headset disconnected | queued read is cancelled; `read()` refuses disconnected devices, so no socket is opened |
+
+The policy check and the "attempt started" timestamp are written together under the preferences
+lock, so two workers can't both open the channel. Queued reads are unique per device (`shokz:<address>`,
+`KEEP`). There is never a persistent socket.
+
+**What is stored** (per device, SharedPreferences): left, right and case each with their own sample
+time; the connection start time; last attempt / last success; a "blocked this connection" flag. A
+partial read updates only the parts it returned. The case is never derived from the buds, and the
+single Android percent never overwrites or clears these values.
+
+**Fresh vs last-known vs unknown.** A part is *fresh* when it was sampled during the current
+connection. The connected notification shows only fresh parts:
+`OpenFit 2+ — L 100% · R 100% · Case 60%`, with `—` for parts not read this connection. Before the
+first successful read (or if every read fails) it keeps the old `OpenFit 2+ — 80%` text. The status
+card shows `Left … · Right … · Case …` with the read time while connected, or
+`Last known: …` with its time otherwise. Unknown is always `—`, never 0%.
+
+**Disconnect summary.** If parts were read during the connection, a second line is added:
+`Before disconnect (14:05): L 100% · R 100% · Case 60%`. The summary signature (used for duplicate
+suppression and dismissal) is unchanged, as are the notification ID and foreground service.
+
+### Milestone B on-device checklist
+
+| # | Scenario | Expected |
+|---|---|---|
+| B1 | Setting off, OpenFit connects | no vendor read in debug log; notification `OpenFit 2+ — XX%` |
+| B2 | Setting on, Shokz app stopped, OpenFit connects | one `vendor read ok (connected)` ~5 s after connect; notification shows L/R/Case |
+| B3 | Setting on, Shokz app connected, OpenFit connects | one `vendor read failed (connected) … paused until the headset reconnects`; no further automatic reads; notification stays `XX%` |
+| B4 | Disconnect after B2 | summary has `Before disconnect (HH:mm): …`; status card shows `Last known: …` |
+| B5 | Refresh now while connected | one manual read, notification updated |
 
 ## How to test
 

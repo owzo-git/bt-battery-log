@@ -46,4 +46,8 @@
     <string name="shokz_debug_reading">Reading…</string>
     <string name="shokz_debug_no_device">No connected OpenFit found.</string>
     <string name="shokz_debug_unknown">—</string>
+    <string name="shokz_vendor_read_label">Shokz OpenFit left/right/case</string>
+    <string name="shokz_vendor_read_helper">Experimental. Reads each earbud and the case once after connecting, then at most every 30 minutes. Close the official Shokz app first: a read while it is connected fails and disconnects it. After a failed read, automatic reads stop until the headset reconnects.</string>
+    <string name="shokz_components_fresh">%1$s\nRead %2$s</string>
+    <string name="shokz_components_last_known">Last known: %1$s\nRead %2$s</string>
 </resources>
