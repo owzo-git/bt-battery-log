@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.widget.doAfterTextChanged
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.snackbar.Snackbar
 import com.owzo.btbatteryntfy.data.AppPreferences
 import com.owzo.btbatteryntfy.data.AppSettings
@@ -20,6 +21,11 @@ import com.owzo.btbatteryntfy.databinding.ActivityMainBinding
 import com.owzo.btbatteryntfy.monitor.BatteryMonitorEngine
 import com.owzo.btbatteryntfy.monitor.BatteryNotificationController
 import com.owzo.btbatteryntfy.monitor.MonitoringWorkScheduler
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzOpenFitBatteryProvider
+import com.owzo.btbatteryntfy.monitor.shokz.ShokzReadResult
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
@@ -120,6 +126,82 @@ class MainActivity : AppCompatActivity() {
             appPreferences.clearLogs()
             refreshStatusOnly()
         }
+
+        binding.shokzReadButton.setOnClickListener {
+            readShokzBattery()
+        }
+    }
+
+    private fun readShokzBattery() {
+        if (!BatteryMonitorEngine.hasBluetoothConnectPermission(this)) {
+            showSnackbar(getString(R.string.bluetooth_permission_required))
+            return
+        }
+
+        binding.shokzReadButton.isEnabled = false
+        binding.shokzDebugResultText.text = getString(R.string.shokz_debug_reading)
+        lifecycleScope.launch {
+            try {
+                val devices = withContext(Dispatchers.IO) {
+                    ShokzOpenFitBatteryProvider.findConnectedDevices(applicationContext)
+                }
+                if (devices.isEmpty()) {
+                    appPreferences.appendDebugLog("Shokz read: no connected OpenFit found.")
+                    binding.shokzDebugResultText.text = getString(R.string.shokz_debug_no_device)
+                    return@launch
+                }
+
+                val sections = devices.map { device ->
+                    val label = BatteryMonitorEngine.displayName(BatteryMonitorEngine.safeDeviceName(device), null)
+                    val result = ShokzOpenFitBatteryProvider.read(applicationContext, device)
+                    appPreferences.appendDebugLog(shokzLogLine(label, result))
+                    shokzResultText(label, result)
+                }
+                binding.shokzDebugResultText.text = sections.joinToString(separator = "\n\n")
+            } finally {
+                binding.shokzReadButton.isEnabled = true
+            }
+        }
+    }
+
+    private fun shokzResultText(label: String, result: ShokzReadResult): String = buildString {
+        appendLine(label)
+        when (result) {
+            is ShokzReadResult.Success -> {
+                val status = result.status
+                appendLine(
+                    "L ${formatShokzPercent(status.left)} · R ${formatShokzPercent(status.right)} · " +
+                        "Case ${formatShokzPercent(status.case)}",
+                )
+                appendLine(
+                    "Sampled ${BatteryMonitorEngine.formatReadableTimestamp(status.sampledAtMs)} " +
+                        "in ${result.elapsedMs} ms",
+                )
+                append(result.diagnostics.describe())
+            }
+            is ShokzReadResult.Failure -> {
+                append("Failed: ${result.failure.label} after ${result.elapsedMs} ms")
+                result.detail?.let { append("\n$it") }
+                result.diagnostics?.let { append("\n${it.describe()}") }
+            }
+        }
+    }
+
+    private fun shokzLogLine(label: String, result: ShokzReadResult): String {
+        return when (result) {
+            is ShokzReadResult.Success -> {
+                val status = result.status
+                "Shokz read OK: $label L ${formatShokzPercent(status.left)} · " +
+                    "R ${formatShokzPercent(status.right)} · Case ${formatShokzPercent(status.case)} " +
+                    "(${result.elapsedMs} ms)."
+            }
+            is ShokzReadResult.Failure ->
+                "Shokz read failed: $label — ${result.failure.label} after ${result.elapsedMs} ms."
+        }
+    }
+
+    private fun formatShokzPercent(value: Int?): String {
+        return value?.let { "$it%" } ?: getString(R.string.shokz_debug_unknown)
     }
 
     private fun populateForm(settings: AppSettings) {
