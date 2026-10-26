@@ -1,6 +1,6 @@
 # Shokz OpenFit 2+ battery (experimental)
 
-Status: **Milestone A spike** for issue #1 — transport validated on Android 15 (see results below).
+Status: **Milestone A spike** for issue #1 — transport validated on Android 15; all scenarios run (see results below).
 
 The app can read left bud, right bud and charging case battery from a connected Shokz OpenFit over
 the vendor RFCOMM service (SDP UUID `0000fef0-0000-1000-8000-00805f9b34fb`), using only public
@@ -47,7 +47,8 @@ No MAC addresses or full frames are logged.
 | 2026-10-26 | Sony XQ-DC54 / 15 | b | `RFCOMM connect failed` | 271–286 ms | **Kicks the official app off the headset** — see below |
 | 2026-10-26 | Sony XQ-DC54 / 15 | d | one read, then a later one OK | 1501 ms | button is disabled while reading, so a double tap starts one read |
 | 2026-10-26 | Sony XQ-DC54 / 15 | c | L 100% · R 100% · Case 60% | 1418 ms | audiobook playing; no audible glitch, player stayed `PLAYING` |
-| | | e | not run yet | | |
+| 2026-10-26 | Sony XQ-DC54 / 15 | e, right bud in case | L 100% · R 100% · Case 60% | 1709 ms | payload unchanged (`00090900`); a full bud in the case still reports 9, so in-case state is not visible from `0x03` |
+| 2026-10-26 | Sony XQ-DC54 / 15 | e, both buds in closed case | `No connected OpenFit found.` | — | headset disconnected (ACL) ~15 s before; no socket was opened, no stale values shown |
 
 ### Finding: a failed read disconnects the official Shokz app
 
