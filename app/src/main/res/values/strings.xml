@@ -40,7 +40,7 @@
     <string name="refresh_scheduled">Refresh scheduled.</string>
     <string name="bluetooth_permission_required">Bluetooth permission is required for monitoring.</string>
     <string name="shokz_debug_header">Shokz OpenFit (experimental)</string>
-    <string name="shokz_debug_description">Reads left, right and case battery over the Shokz vendor channel. Fails if the official Shokz app holds the channel.</string>
+    <string name="shokz_debug_description">Reads left, right and case battery over the Shokz vendor channel. Close the official Shokz app first: reading while it is connected fails and disconnects it.</string>
     <string name="shokz_debug_idle">Not read yet.</string>
     <string name="shokz_debug_read">Read Shokz battery</string>
     <string name="shokz_debug_reading">Reading…</string>

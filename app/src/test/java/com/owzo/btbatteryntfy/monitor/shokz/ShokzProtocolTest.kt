@@ -148,6 +148,20 @@ class ShokzProtocolTest {
     }
 
     @Test
+    fun decodesPayloadsCapturedFromOpenFit2Plus() {
+        // Captured on device; official app showed L 100% / R 100% / Case 60%.
+        val responses = ShokzFrameParser().feed(
+            responseFrame(0x03, ShokzProtocol.hexToBytes("00090900")) +
+                responseFrame(0x0B, ShokzProtocol.hexToBytes("003c0000")),
+        )
+        val status = ShokzProtocol.decodeBattery(responses.associate { it.opcode to it.payload }, 0L)!!
+
+        assertEquals(100, status.left)
+        assertEquals(100, status.right)
+        assertEquals(60, status.case)
+    }
+
+    @Test
     fun missingComponentsStayUnknown() {
         val budsOnly = ShokzProtocol.decodeBattery(mapOf(0x03 to byteArrayOf(0x00, 9, 8)), 0L)!!
         assertEquals(100, budsOnly.left)

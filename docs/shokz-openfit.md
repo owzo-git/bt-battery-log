@@ -1,6 +1,6 @@
 # Shokz OpenFit 2+ battery (experimental)
 
-Status: **Milestone A spike** for issue #1 — transport not yet validated on Android.
+Status: **Milestone A spike** for issue #1 — transport validated on Android 15 (see results below).
 
 The app can read left bud, right bud and charging case battery from a connected Shokz OpenFit over
 the vendor RFCOMM service (SDP UUID `0000fef0-0000-1000-8000-00805f9b34fb`), using only public
@@ -20,7 +20,7 @@ Run each scenario and record the result:
 | # | Scenario | Expected |
 |---|---|---|
 | a | Shokz app force-stopped | L/R/Case values |
-| b | Shokz app open / running in background | likely `RFCOMM connect failed` (channel is single-client) |
+| b | Shokz app open / running in background | `RFCOMM connect failed`, fast and clean |
 | c | During music playback (Shokz app stopped) | values, no audible glitch |
 | d | Read pressed twice quickly | second read waits, both finish, no error |
 | e | Buds in closed case / one bud out | missing parts shown as `—`, never 0% |
@@ -43,4 +43,25 @@ No MAC addresses or full frames are logged.
 
 | Date | Phone / Android | Scenario | Result | Read time | Notes |
 |---|---|---|---|---|---|
-| | | | | | |
+| 2026-10-26 | Sony XQ-DC54 / 15 | a | L 100% · R 100% · Case 60% — matches official app | 1327–1501 ms | 3 runs, `rx=484B`, all 7 polled opcodes plus `0x31` (init) answered; `0x03=00090900`, `0x0B=003c0000` |
+| 2026-10-26 | Sony XQ-DC54 / 15 | b | `RFCOMM connect failed` | 271–286 ms | **Kicks the official app off the headset** — see below |
+| 2026-10-26 | Sony XQ-DC54 / 15 | d | one read, then a later one OK | 1501 ms | button is disabled while reading, so a double tap starts one read |
+| | | c | not run yet | | |
+| | | e | not run yet | | |
+
+### Finding: a failed read disconnects the official Shokz app
+
+With the Shokz app connected (showing L/R/Case), one **failed** read from this app made the Shokz
+app switch to "Device disconnected. Attempting to reconnect…" and stay there for over a minute.
+Control run without our read: the Shokz app stayed connected. The audio link was not affected, and
+force-stopping and reopening the Shokz app restored it. A successful read while the Shokz app is
+stopped does not stop the Shokz app connecting later.
+
+So the headset seems to drop its existing vendor RFCOMM session when a second client connects.
+Implications for Milestone B:
+
+- Background polling must not run while the Shokz app may be connected, or it will repeatedly kick
+  the Shokz app off. Android does not let us see whether another app is running or holds the channel.
+- Safest default: Shokz reads stay opt-in (setting off by default), with a clear warning, and are
+  done at most once per connect plus rarely after that. After a `CONNECT_FAILED`, back off for the
+  rest of the session instead of retrying.
