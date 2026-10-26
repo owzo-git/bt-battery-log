@@ -287,17 +287,12 @@ object BatteryMonitorEngine {
         )
         // Values captured while still connected; no vendor read happens after a disconnect.
         val shokzComponents = currentShokzComponents(appPreferences, settings, deviceIdentity)
-        val summaryText = buildString {
-            append("$deviceLabel disconnected at $batteryPercent% — $disconnectClock")
-            if (!shokzComponents.isEmpty) {
-                val capturedClock = disconnectClockFormatter.format(
-                    LocalDateTime.ofInstant(
-                        Instant.ofEpochMilli(shokzComponents.latestSampledAtMs),
-                        ZoneId.systemDefault(),
-                    ),
-                )
-                append("\nBefore disconnect ($capturedClock): ${ShokzComponentFormatter.compact(shokzComponents)}")
-            }
+        // Shokz parts, when read this connection, replace the single percent and the clock; the
+        // notification already carries its own time.
+        val summaryText = if (shokzComponents.isEmpty) {
+            "$deviceLabel disconnected at $batteryPercent% — $disconnectClock"
+        } else {
+            "$deviceLabel disconnected at ${ShokzComponentFormatter.compact(shokzComponents)}"
         }
         val summarySignature = "$deviceIdentity|$batteryPercent|$seenAtMs"
 

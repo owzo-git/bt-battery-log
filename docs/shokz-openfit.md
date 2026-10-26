@@ -1,7 +1,7 @@
 # Shokz OpenFit 2+ battery (experimental)
 
-Status: issue #1 — **Milestone A** (transport) validated on Android 15; **Milestone B** (opt-in
-left/right/case in the normal app flow) implemented and checked on-device (B1–B5 pass).
+Status: shipped for issue #1 (opt-in, experimental). Milestone A (transport) and Milestone B
+(left/right/case in the normal app flow) are both checked on-device on Android 15.
 
 The app can read left bud, right bud and charging case battery from a connected Shokz OpenFit over
 the vendor RFCOMM service (SDP UUID `0000fef0-0000-1000-8000-00805f9b34fb`), using only public
@@ -41,18 +41,19 @@ first successful read (or if every read fails) it keeps the old `OpenFit 2+ — 
 card shows `Left … · Right … · Case …` with the read time while connected, or
 `Last known: …` with its time otherwise. Unknown is always `—`, never 0%.
 
-**Disconnect summary.** If parts were read during the connection, a second line is added:
-`Before disconnect (14:05): L 100% · R 100% · Case 60%`. The summary signature (used for duplicate
-suppression and dismissal) is unchanged, as are the notification ID and foreground service.
+**Disconnect summary.** If parts were read during the connection, they replace the single percent
+and the clock: `OpenFit 2+ disconnected at L 100% · R 100% · Case 60%` (the notification has its own
+time). Otherwise it stays `OpenFit 2+ disconnected at 80% — 14:05`. The summary signature (used for
+duplicate suppression and dismissal) is unchanged, as are the notification ID and foreground service.
 
 ### Milestone B on-device checklist
 
 | # | Scenario | Expected |
 |---|---|---|
 | B1 | Setting off, OpenFit connects | no vendor read in debug log; notification `OpenFit 2+ — XX%` |
-| B2 | Setting on, Shokz app stopped, OpenFit connects | one `vendor read ok (connected)` ~5 s after connect; notification shows L/R/Case |
+| B2 | Setting on, Shokz app stopped, OpenFit connects | one `vendor read ok (connected)` ~5 s after connect; notification shows `lower bud / case` |
 | B3 | Setting on, Shokz app connected, OpenFit connects | one `vendor read failed (connected) … paused until the headset reconnects`; no further automatic reads; notification stays `XX%` |
-| B4 | Disconnect after B2 | summary has `Before disconnect (HH:mm): …`; status card shows `Last known: …` |
+| B4 | Disconnect after B2 | summary `… disconnected at L … · R … · Case …`; status card shows `Last known: …` |
 | B5 | Refresh now while connected | one manual read, notification updated |
 
 ## How to test
@@ -98,7 +99,7 @@ No MAC addresses or full frames are logged.
 | 2026-10-26 | Sony XQ-DC54 / 15 | B1 | no vendor read; notification `OpenFit 2+ by Shokz — 100%` | — | setting off |
 | 2026-10-26 | Sony XQ-DC54 / 15 | B2 | one `vendor read ok (connected)` 6 s after connect; notification `… — L 100% · R 100% · Case 60%` | 1347 ms | two connect events (1 s apart) gave one read; session block flag reset on reconnect |
 | 2026-10-26 | Sony XQ-DC54 / 15 | B3 | one `vendor read failed (connected) … paused`; no further automatic reads; notification `… — 100%`; card `Last known: … Read 18:59` | — | Shokz app open; as in scenario b it then shows "Device disconnected. Attempting to reconnect…" |
-| 2026-10-26 | Sony XQ-DC54 / 15 | B4 | summary `… disconnected at 100% — 18:59 Before disconnect (18:58): L 100% · R 100% · Case 60%` | — | no socket opened while disconnected |
+| 2026-10-26 | Sony XQ-DC54 / 15 | B4 | summary `… disconnected at 100% — 18:59 Before disconnect (18:58): L 100% · R 100% · Case 60%` | — | no socket opened while disconnected; summary later shortened to `… disconnected at L 100% · R 100% · Case 60%` |
 | 2026-10-26 | Sony XQ-DC54 / 15 | B5 | one `vendor read ok (manual)`; card and notification updated | 1491 ms | |
 
 ### Finding: a failed read disconnects the official Shokz app

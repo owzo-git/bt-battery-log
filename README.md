@@ -28,6 +28,24 @@ No `ntfy`, no server, no internet setup.
 - Summary stays until user swipes it away.
 - Duplicate disconnect summaries are suppressed.
 
+### Shokz OpenFit left/right/case (experimental, opt-in)
+
+For Shokz OpenFit headsets the app can also read each earbud and the charging case over the
+headset's vendor Bluetooth channel. Turn on **Shokz OpenFit left/right/case** in settings (off by
+default). Then:
+
+- connected notification: `OpenFit 2+ by Shokz — 90% / 60%` (lower earbud / case)
+- disconnect summary: `OpenFit 2+ by Shokz disconnected at L 90% · R 100% · Case 60%`
+- status card: left, right and case with the read time, or `Last known: …` when not connected
+- unknown values are shown as `—`, never 0%
+
+Close the official Shokz app first: the headset allows one vendor client at a time, and a read while
+the Shokz app is connected fails and disconnects that app. The app reads once a few seconds after
+connecting and at most every 30 minutes after that; after a failed read it stops until the headset
+reconnects. Details: [docs/shokz-openfit.md](docs/shokz-openfit.md). Protocol ported from
+[shokz-openfit-battery-sdk](https://github.com/YentlHendrickx/shokz-openfit-battery-sdk) (MIT), see
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Notification persistence behavior
 
 - App uses a foreground service while headset is connected to make connected-state notification behavior as persistent as Android allows.
@@ -37,6 +55,7 @@ No `ntfy`, no server, no internet setup.
 
 - Monitoring on/off
 - Disconnect delay seconds
+- Shokz OpenFit left/right/case (opt-in)
 - Refresh now
 - Clear activity + debug logs
 - Activity feed (compact, user-facing lifecycle events)
