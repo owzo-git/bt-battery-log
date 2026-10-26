@@ -46,7 +46,7 @@ No MAC addresses or full frames are logged.
 | 2026-10-26 | Sony XQ-DC54 / 15 | a | L 100% · R 100% · Case 60% — matches official app | 1327–1501 ms | 3 runs, `rx=484B`, all 7 polled opcodes plus `0x31` (init) answered; `0x03=00090900`, `0x0B=003c0000` |
 | 2026-10-26 | Sony XQ-DC54 / 15 | b | `RFCOMM connect failed` | 271–286 ms | **Kicks the official app off the headset** — see below |
 | 2026-10-26 | Sony XQ-DC54 / 15 | d | one read, then a later one OK | 1501 ms | button is disabled while reading, so a double tap starts one read |
-| | | c | not run yet | | |
+| 2026-10-26 | Sony XQ-DC54 / 15 | c | L 100% · R 100% · Case 60% | 1418 ms | audiobook playing; no audible glitch, player stayed `PLAYING` |
 | | | e | not run yet | | |
 
 ### Finding: a failed read disconnects the official Shokz app
