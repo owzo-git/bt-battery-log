@@ -232,7 +232,7 @@ object BatteryMonitorEngine {
         return if (components.isEmpty) {
             "$deviceLabel — $batteryPercent%"
         } else {
-            "$deviceLabel — ${ShokzComponentFormatter.compact(components)}"
+            "$deviceLabel — ${ShokzComponentFormatter.notification(components, batteryPercent)}"
         }
     }
 

@@ -34,8 +34,9 @@ partial read updates only the parts it returned. The case is never derived from 
 single Android percent never overwrites or clears these values.
 
 **Fresh vs last-known vs unknown.** A part is *fresh* when it was sampled during the current
-connection. The connected notification shows only fresh parts:
-`OpenFit 2+ — L 100% · R 100% · Case 60%`, with `—` for parts not read this connection. Before the
+connection. The connected notification shows only fresh parts as `lower bud / case`:
+`OpenFit 2+ — 90% / 60%`. If neither bud was read this connection, the bud figure is Android's
+single percent; an unread case is `—` (`OpenFit 2+ — 90% / —`). Before the
 first successful read (or if every read fails) it keeps the old `OpenFit 2+ — 80%` text. The status
 card shows `Left … · Right … · Case …` with the read time while connected, or
 `Last known: …` with its time otherwise. Unknown is always `—`, never 0%.

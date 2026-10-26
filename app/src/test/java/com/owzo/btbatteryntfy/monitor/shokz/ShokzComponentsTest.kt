@@ -64,6 +64,20 @@ class ShokzComponentsTest {
         assertEquals("L 100% · R 100% · Case 60%", ShokzComponentFormatter.compact(components))
         assertEquals("Left 100% · Right 100% · Case 60%", ShokzComponentFormatter.labeled(components))
     }
+
+    @Test
+    fun notificationShowsLowerBudThenCase() {
+        val components = ShokzComponents().mergedWith(status(90, 70, 60, at = 1))
+        assertEquals("70% / 60%", ShokzComponentFormatter.notification(components, budsFallbackPercent = 100))
+    }
+
+    @Test
+    fun notificationFallsBackForBudsButNeverForCase() {
+        val leftOnly = ShokzComponents().mergedWith(status(80, null, null, at = 1))
+        assertEquals("80% / —", ShokzComponentFormatter.notification(leftOnly, budsFallbackPercent = 100))
+        val caseOnly = ShokzComponents().mergedWith(status(null, null, 40, at = 1))
+        assertEquals("100% / 40%", ShokzComponentFormatter.notification(caseOnly, budsFallbackPercent = 100))
+    }
 }
 
 class ShokzReadPolicyTest {

@@ -51,6 +51,16 @@ object ShokzComponentFormatter {
     fun labeled(components: ShokzComponents): String =
         "Left ${percent(components.left)} · Right ${percent(components.right)} · Case ${percent(components.case)}"
 
+    /**
+     * `80% / 60%` for the connected notification: the lower bud, then the case. Falls back to
+     * [budsFallbackPercent] (Android's single percent) when neither bud is known.
+     */
+    fun notification(components: ShokzComponents, budsFallbackPercent: Int): String {
+        val buds = listOfNotNull(components.left?.percent, components.right?.percent).minOrNull()
+            ?: budsFallbackPercent
+        return "$buds% / ${percent(components.case)}"
+    }
+
     private fun percent(reading: ShokzComponentReading?): String = reading?.let { "${it.percent}%" } ?: UNKNOWN
 }
 
