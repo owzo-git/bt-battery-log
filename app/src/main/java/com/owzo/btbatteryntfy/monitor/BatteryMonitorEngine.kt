@@ -271,10 +271,7 @@ object BatteryMonitorEngine {
             appPreferences.appendDebugLog(
                 "$deviceLabel disconnected, but no battery value was seen during the session.",
             )
-            val serviceStopRequested = BatteryNotificationController.stopConnectedNotificationService(
-                context = context,
-                removeNotification = true,
-            )
+            val serviceStopRequested = BatteryNotificationController.removeConnectedNotification(context)
             appPreferences.appendDebugLog(
                 "Foreground service stop requested for disconnect without summary: $serviceStopRequested.",
             )
@@ -300,10 +297,7 @@ object BatteryMonitorEngine {
             deviceIdentity = deviceIdentity,
             summarySignature = summarySignature,
         )
-        val stopRequested = BatteryNotificationController.stopConnectedNotificationService(
-            context = context,
-            removeNotification = suppressionReason != null,
-        )
+        val stopRequested = BatteryNotificationController.removeConnectedNotification(context)
         appPreferences.appendDebugLog(
             "Foreground service stop requested for disconnect: $stopRequested.",
         )

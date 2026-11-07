@@ -6,6 +6,13 @@ object AppConstants {
     const val NOTIFICATION_CHANNEL_ID = "bt_battery_log_channel"
     const val NOTIFICATION_CHANNEL_NAME = "BT Battery Log"
     const val MAIN_NOTIFICATION_ID = 1001
+
+    /**
+     * Separate from [MAIN_NOTIFICATION_ID]: the foreground service owns that ID, and the system
+     * cancels or re-posts it asynchronously when the service leaves the foreground, which can
+     * overwrite a summary posted under the same ID.
+     */
+    const val DISCONNECT_SUMMARY_NOTIFICATION_ID = 1002
     const val ACTION_NOTIFICATION_DISMISSED =
         "com.owzo.btbatteryntfy.action.NOTIFICATION_DISMISSED"
     const val ACTION_CONNECTED_NOTIFICATION_DISMISSED =
@@ -20,7 +27,6 @@ object AppConstants {
     const val EXTRA_DEVICE_NAME = "extra_device_name"
     const val EXTRA_DEVICE_ADDRESS = "extra_device_address"
     const val EXTRA_BATTERY_PERCENT = "extra_battery_percent"
-    const val EXTRA_REMOVE_NOTIFICATION_ON_STOP = "extra_remove_notification_on_stop"
 
     const val ACTION_BATTERY_LEVEL_CHANGED =
         "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED"

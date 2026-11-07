@@ -58,13 +58,7 @@ class ConnectedBatteryNotificationService : Service() {
 
             AppConstants.ACTION_NOTIFICATION_SERVICE_STOP -> {
                 appPreferences.clearConnectedNotificationState()
-                val removeNotification = intent?.getBooleanExtra(
-                    AppConstants.EXTRA_REMOVE_NOTIFICATION_ON_STOP,
-                    true,
-                ) ?: true
-                stopForeground(
-                    if (removeNotification) STOP_FOREGROUND_REMOVE else STOP_FOREGROUND_DETACH,
-                )
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelfResult(startId)
                 return START_NOT_STICKY
             }

@@ -23,6 +23,8 @@ object BatteryNotificationController {
         batteryPercent: Int,
     ) {
         ensureChannel(context)
+        // A new connection or reading replaces any summary left from the previous disconnect.
+        NotificationManagerCompat.from(context).cancel(AppConstants.DISCONNECT_SUMMARY_NOTIFICATION_ID)
         val serviceIntent = Intent(context, ConnectedBatteryNotificationService::class.java)
             .setAction(AppConstants.ACTION_NOTIFICATION_SERVICE_START_OR_UPDATE)
             .putExtra(AppConstants.EXTRA_CONNECTED_NOTIFICATION_TEXT, contentText)
@@ -71,25 +73,31 @@ object BatteryNotificationController {
             .setCategory(NotificationCompat.CATEGORY_STATUS)
 
         NotificationManagerCompat.from(context)
-            .notify(AppConstants.MAIN_NOTIFICATION_ID, builder.build())
+            .notify(AppConstants.DISCONNECT_SUMMARY_NOTIFICATION_ID, builder.build())
     }
 
-    fun cancelMainNotification(context: Context) {
-        stopConnectedNotificationService(context, removeNotification = true)
-        NotificationManagerCompat.from(context).cancel(AppConstants.MAIN_NOTIFICATION_ID)
+    /** Removes the connected notification and any disconnect summary (monitoring turned off). */
+    fun cancelAllNotifications(context: Context) {
+        removeConnectedNotification(context)
+        NotificationManagerCompat.from(context).cancel(AppConstants.DISCONNECT_SUMMARY_NOTIFICATION_ID)
     }
 
-    fun stopConnectedNotificationService(
-        context: Context,
-        removeNotification: Boolean,
-    ): Boolean {
+    /**
+     * Stops the foreground service and removes the connected notification. The direct cancel
+     * covers the fallback notification posted when the service could not start; the system
+     * ignores it while the service still owns the notification.
+     *
+     * @return whether the service stop request was delivered.
+     */
+    fun removeConnectedNotification(context: Context): Boolean {
         val stopIntent = Intent(context, ConnectedBatteryNotificationService::class.java)
             .setAction(AppConstants.ACTION_NOTIFICATION_SERVICE_STOP)
-            .putExtra(AppConstants.EXTRA_REMOVE_NOTIFICATION_ON_STOP, removeNotification)
-        return runCatching {
+        val stopRequested = runCatching {
             context.startService(stopIntent)
             true
         }.getOrElse { false }
+        NotificationManagerCompat.from(context).cancel(AppConstants.MAIN_NOTIFICATION_ID)
+        return stopRequested
     }
 
     fun buildConnectedNotification(context: Context, contentText: String): Notification {

@@ -102,7 +102,7 @@ class MainActivity : AppCompatActivity() {
                 MonitoringWorkScheduler.enqueueSnapshot(applicationContext, reason = "monitoring_enabled")
             } else {
                 appPreferences.appendDebugLog("Monitoring disabled.")
-                BatteryNotificationController.cancelMainNotification(applicationContext)
+                BatteryNotificationController.cancelAllNotifications(applicationContext)
                 appPreferences.clearConnectedNotificationState()
             }
         }
