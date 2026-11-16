@@ -1,0 +1,89 @@
+# Builds a signed release APK and publishes it as a GitHub Release.
+#
+# Runs on every push to main. It reads versionName from app/build.gradle.kts and
+# creates release "v<versionName>" only if that release does not exist yet, so a
+# new release happens whenever versionName (and versionCode) is bumped.
+# Can also be started by hand from the Actions tab.
+name: Release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version
+        id: version
+        run: |
+          name=$(sed -nE 's/^\s*versionName\s*=\s*"([^"]+)".*/\1/p' app/build.gradle.kts)
+          code=$(sed -nE 's/^\s*versionCode\s*=\s*([0-9]+).*/\1/p' app/build.gradle.kts)
+          test -n "$name" && test -n "$code"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$name" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.tag }} already exists, nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.exists == 'false'
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.check.outputs.exists == 'false'
+
+      - name: Build and sign release APK
+        if: steps.check.outputs.exists == 'false'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/release.p12"
+          printf %s "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          # gradle.properties pins a local Android Studio JDK; use the runner's JDK instead.
+          ./gradlew -Dorg.gradle.java.home="$JAVA_HOME" --no-daemon testDebugUnitTest assembleRelease
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Verify signature
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          apk=app/build/outputs/apk/release/app-release.apk
+          apksigner=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk"
+          cp "$apk" "bt-battery-log-${{ steps.version.outputs.tag }}.apk"
+
+      - name: Publish GitHub Release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "bt-battery-log-${{ steps.version.outputs.tag }}.apk" \
+            --target "$GITHUB_SHA" \
+            --title "BT Battery Log ${{ steps.version.outputs.tag }}" \
+            --generate-notes
