@@ -78,6 +78,23 @@ Internal diagnostic messages are kept in detailed debug log, not in main feed.
 - `android.permission.FOREGROUND_SERVICE`
 - `android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE`
 
+## Download
+
+Get the latest APK from [Releases](https://github.com/owzo-git/bt-battery-log/releases/latest)
+(`bt-battery-log-vX.Y.apk`). Open it on the phone and allow installing apps from that source
+(browser or file manager) when Android asks. Requires Android 8.0 or newer.
+
+## Releases
+
+Releases are made by [.github/workflows/release.yml](.github/workflows/release.yml). On every push to
+`main` it reads `versionName` from `app/build.gradle.kts` and, if release `v<versionName>` does not
+exist yet, builds a signed APK and publishes it. To release, bump `versionName` and `versionCode`
+(must always increase) and merge to `main`.
+
+Release signing key: repo secrets `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`. Keep the offline copy of the keystore safe: without
+it, new releases cannot update existing installs.
+
 ## Build
 
 ```bash
